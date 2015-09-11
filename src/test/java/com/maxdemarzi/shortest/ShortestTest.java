@@ -174,6 +174,16 @@ public class ShortestTest {
         assertArrayEquals(expected.toArray(), actual.toArray());
     }
 
+    @Test
+    public void shouldFindShortestPathByEither() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_either").toString(),
+                QUERY_ONE_MAP);
+
+        ArrayList actual = parseNewlineSeparated(response);
+        ArrayList<HashMap> expected = new ArrayList<HashMap>() {{ add(ONE_MAP); }};
+        assertArrayEquals(expected.toArray(), actual.toArray());
+    }
+
     private ArrayList parseNewlineSeparated(HTTP.Response response) throws Exception {
         String raw = response.rawContent();
         String[] lines = raw.split("\n");

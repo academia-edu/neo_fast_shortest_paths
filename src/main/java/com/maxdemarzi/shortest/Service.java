@@ -141,55 +141,14 @@ public class Service {
             public void write(OutputStream os) throws IOException, WebApplicationException {
                 JsonGenerator jg = objectMapper.getJsonFactory().createJsonGenerator(os, JsonEncoding.UTF8);
 
-                ArrayList<Node> edgeEmailNodes = new ArrayList<>();
-
                 // Validate our input or exit right away
                 HashMap input = getValidQueryInput(body);
 
-                try (Transaction tx = db.beginTx()) {
-                    final Node centerNode;
-                    try {
-                        centerNode = db.getNodeById(emails.get((String) input.get("center_email")));
-                    } catch (ExecutionException e) {
-                        jg.close();
-                        return;
-                    }
-                    for (String edgeEmail : (ArrayList<String>) input.get("edge_emails")) {
-                        Long id;
-                        try {
-                            id = emails.get(edgeEmail);
-                        } catch (Exception e) {
-                            continue;
-                        }
-                        final Node edgeEmailNode = db.getNodeById(id);
-                        edgeEmailNodes.add(edgeEmailNode);
-                    }
+                String centerEmail = (String) input.get("center_email");
+                List<String> edgeEmails = (ArrayList<String>) input.get("edge_emails");
+                int length = (int) input.get("length");
 
-                    PathExpander<?> expander = PathExpanders.allTypesAndDirections();
-                    PathFinder<org.neo4j.graphdb.Path> shortestPath = GraphAlgoFactory.shortestPath(expander, (int) input.get("length"));
-
-                    for (Node edgeEmail : edgeEmailNodes) {
-                        HashMap<String, Object> result = new HashMap<>();
-                        int length = 0;
-                        int count = 0;
-                        for ( org.neo4j.graphdb.Path path : shortestPath.findAllPaths( centerNode, edgeEmail ) )
-                        {
-                            length = path.length();
-                            count++;
-                        }
-
-                        if (length > 0 && count > 0) {
-                            jg.writeStartObject();
-                            jg.writeStringField("email", (String) edgeEmail.getProperty("email", ""));
-                            jg.writeNumberField("length", length);
-                            jg.writeNumberField("count", count);
-                            jg.writeEndObject();
-                            jg.writeRaw("\n");
-                            jg.flush();
-                        }
-                    }
-                }
-                jg.close();
+                streamShortestPathsUsingBuiltinAlgo(centerEmail, edgeEmails, length, jg);
             }
         };
         return Response.ok().entity(stream).type(MediaType.APPLICATION_JSON).build();
@@ -212,98 +171,187 @@ public class Service {
 
                 // Validate our input or exit right away
                 HashMap input = getValidQueryInput(body);
-                int maxLength = (int) input.get("length");
 
-                final long startTime = System.currentTimeMillis();
-                final long maxEndTime = startTime + 12000; // TODO Make configurable
-                boolean timedOut = false;
+                String centerEmail = (String) input.get("center_email");
+                List<String> edgeEmails = (ArrayList<String>) input.get("edge_emails");
+                int length = (int) input.get("length");
 
-                try (Transaction tx = db.beginTx()) {
-                    final Long centerNodeId;
-                    try {
-                        centerNodeId = emails.get((String) input.get("center_email"));
-                    } catch (ExecutionException e) {
-                        jg.close();
-                        return;
-                    }
-
-                    final Map<Long,String> edgeEmailsByNodeId = new HashMap<>();
-                    for (String edgeEmail : (ArrayList<String>) input.get("edge_emails")) {
-                        try {
-                            edgeEmailsByNodeId.put(emails.get(edgeEmail), edgeEmail);
-                        } catch (ExecutionException e) {
-                            continue;
-                        }
-                    }
-
-                    int level = 1;
-                    LongSet idsForLevel = HashLongSets.newMutableSet();
-                    idsForLevel.add(centerNodeId);
-
-                    while (level <= maxLength && !edgeEmailsByNodeId.isEmpty() && !idsForLevel.isEmpty()) {
-                        HashLongIntMap counter = HashLongIntMaps.newMutableMap();
-
-                        if (level < maxLength) {
-                            // Get nodes at next level, counting by number of times they appear
-                            LongCursor longCursor = idsForLevel.cursor();
-                            while (longCursor.moveNext()) {
-                                Node friend = db.getNodeById(longCursor.elem());
-                                for (Relationship rel : friend.getRelationships()) {
-                                    counter.addValue(rel.getOtherNode(friend).getId(), 1, 0);
-                                }
-                            }
-                        }
-                        else {
-                            // Last level; get nodes, but only bother to count if it's a node we care about, and add timeout
-                            int iterated = 0;
-
-                            LongCursor longCursor = idsForLevel.cursor();
-                            while (longCursor.moveNext()) {
-                                Node friend = db.getNodeById(longCursor.elem());
-                                for (Relationship rel : friend.getRelationships()) {
-                                    Long id = rel.getOtherNode(friend).getId();
-                                    if (edgeEmailsByNodeId.containsKey(id)) {
-                                        counter.addValue(id, 1, 0);
-                                    }
-                                }
-
-                                iterated++;
-                                if (iterated % 1000 == 0 && System.currentTimeMillis() >= maxEndTime) {
-                                    timedOut = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Now next level is current level; report any target nodes that appear, then stop searching for them
-                        idsForLevel = counter.keySet();
-                        LongCursor longCursor = idsForLevel.cursor();
-                        while (longCursor.moveNext()) {
-                            if (edgeEmailsByNodeId.containsKey(longCursor.elem())) {
-                                jg.writeStartObject();
-                                jg.writeStringField("email", edgeEmailsByNodeId.get(longCursor.elem()));
-                                jg.writeNumberField("length", level);
-                                jg.writeNumberField("count", counter.get(longCursor.elem()));
-                                jg.writeEndObject();
-                                jg.writeRaw("\n");
-
-                                edgeEmailsByNodeId.remove(longCursor.elem());
-                            }
-                        }
-                        jg.flush();
-
-                        if (timedOut) {
-                            throw Exceptions.timedOut;
-                        }
-
-                        level++;
-                    }
-                }
-
-                jg.close();
+                streamShortestPathsUsingBFSCounter(centerEmail, edgeEmails, length, jg);
             }
         };
         return Response.ok().entity(stream).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * JSON formatted body requires:
+     *  center_email: An email address
+     *  edge_emails: An Array of email addresses
+     *  length: An integer representing the maximum traversal search length
+     */
+    @POST
+    @Path("/query_either")
+    public Response query_either(String body, @Context GraphDatabaseService db) throws IOException, ExecutionException {
+
+        StreamingOutput stream = new StreamingOutput() {
+            @Override
+            public void write(OutputStream os) throws IOException, WebApplicationException {
+                JsonGenerator jg = objectMapper.getJsonFactory().createJsonGenerator(os, JsonEncoding.UTF8);
+
+                // Validate our input or exit right away
+                HashMap input = getValidQueryInput(body);
+
+                String centerEmail = (String) input.get("center_email");
+                List<String> edgeEmails = (ArrayList<String>) input.get("edge_emails");
+                int length = (int) input.get("length");
+
+                if (edgeEmails.size() <= length) {
+                    streamShortestPathsUsingBuiltinAlgo(centerEmail, edgeEmails, length, jg);
+                } else {
+                    streamShortestPathsUsingBFSCounter(centerEmail, edgeEmails, length, jg);
+                }
+            }
+        };
+        return Response.ok().entity(stream).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    private void streamShortestPathsUsingBuiltinAlgo(String centerEmail, List<String> edgeEmails, int maxLength, JsonGenerator jg) throws IOException {
+        final List<Node> edgeEmailNodes = new ArrayList<>();
+
+        try (Transaction tx = db.beginTx()) {
+            final Node centerNode;
+            try {
+                centerNode = db.getNodeById(emails.get(centerEmail));
+            } catch (ExecutionException e) {
+                jg.close();
+                return;
+            }
+            for (String edgeEmail : edgeEmails) {
+                Long id;
+                try {
+                    id = emails.get(edgeEmail);
+                } catch (Exception e) {
+                    continue;
+                }
+                edgeEmailNodes.add(db.getNodeById(id));
+            }
+
+            PathExpander<?> expander = PathExpanders.allTypesAndDirections();
+            PathFinder<org.neo4j.graphdb.Path> shortestPath = GraphAlgoFactory.shortestPath(expander, maxLength);
+
+            for (Node edgeEmail : edgeEmailNodes) {
+                HashMap<String, Object> result = new HashMap<>();
+                int length = 0;
+                int count = 0;
+                for ( org.neo4j.graphdb.Path path : shortestPath.findAllPaths( centerNode, edgeEmail ) )
+                {
+                    length = path.length();
+                    count++;
+                }
+
+                if (length > 0 && count > 0) {
+                    jg.writeStartObject();
+                    jg.writeStringField("email", (String) edgeEmail.getProperty("email", ""));
+                    jg.writeNumberField("length", length);
+                    jg.writeNumberField("count", count);
+                    jg.writeEndObject();
+                    jg.writeRaw("\n");
+                    jg.flush();
+                }
+            }
+        }
+
+        jg.close();
+    }
+
+    private void streamShortestPathsUsingBFSCounter(String centerEmail, List<String> edgeEmails, int maxLength, JsonGenerator jg) throws IOException {
+        final long startTime = System.currentTimeMillis();
+        final long maxEndTime = startTime + 12000; // TODO Make configurable
+        boolean timedOut = false;
+
+        try (Transaction tx = db.beginTx()) {
+            final Long centerNodeId;
+            try {
+                centerNodeId = emails.get(centerEmail);
+            } catch (ExecutionException e) {
+                jg.close();
+                return;
+            }
+
+            final Map<Long,String> edgeEmailsByNodeId = new HashMap<>();
+            for (String edgeEmail : edgeEmails) {
+                try {
+                    edgeEmailsByNodeId.put(emails.get(edgeEmail), edgeEmail);
+                } catch (ExecutionException e) {
+                    continue;
+                }
+            }
+
+            int level = 1;
+            LongSet idsForLevel = HashLongSets.newMutableSet();
+            idsForLevel.add(centerNodeId);
+
+            while (level <= maxLength && !edgeEmailsByNodeId.isEmpty() && !idsForLevel.isEmpty()) {
+                HashLongIntMap counter = HashLongIntMaps.newMutableMap();
+
+                if (level < maxLength) {
+                    // Get nodes at next level, counting by number of times they appear
+                    LongCursor longCursor = idsForLevel.cursor();
+                    while (longCursor.moveNext()) {
+                        Node friend = db.getNodeById(longCursor.elem());
+                        for (Relationship rel : friend.getRelationships()) {
+                            counter.addValue(rel.getOtherNode(friend).getId(), 1, 0);
+                        }
+                    }
+                }
+                else {
+                    // Last level; get nodes, but only bother to count if it's a node we care about, and add timeout
+                    int iterated = 0;
+
+                    LongCursor longCursor = idsForLevel.cursor();
+                    while (longCursor.moveNext()) {
+                        Node friend = db.getNodeById(longCursor.elem());
+                        for (Relationship rel : friend.getRelationships()) {
+                            Long id = rel.getOtherNode(friend).getId();
+                            if (edgeEmailsByNodeId.containsKey(id)) {
+                                counter.addValue(id, 1, 0);
+                            }
+                        }
+
+                        iterated++;
+                        if (iterated % 1000 == 0 && System.currentTimeMillis() >= maxEndTime) {
+                            timedOut = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Now next level is current level; report any target nodes that appear, then stop searching for them
+                idsForLevel = counter.keySet();
+                LongCursor longCursor = idsForLevel.cursor();
+                while (longCursor.moveNext()) {
+                    if (edgeEmailsByNodeId.containsKey(longCursor.elem())) {
+                        jg.writeStartObject();
+                        jg.writeStringField("email", edgeEmailsByNodeId.get(longCursor.elem()));
+                        jg.writeNumberField("length", level);
+                        jg.writeNumberField("count", counter.get(longCursor.elem()));
+                        jg.writeEndObject();
+                        jg.writeRaw("\n");
+
+                        edgeEmailsByNodeId.remove(longCursor.elem());
+                    }
+                }
+                jg.flush();
+
+                if (timedOut) {
+                    jg.close();
+                    throw Exceptions.timedOut;
+                }
+
+                level++;
+            }
+        }
+
+        jg.close();
     }
 
 }
