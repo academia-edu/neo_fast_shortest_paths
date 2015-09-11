@@ -14,10 +14,6 @@ import org.codehaus.jackson.map.ObjectMapper;
 import org.neo4j.graphalgo.GraphAlgoFactory;
 import org.neo4j.graphalgo.PathFinder;
 import org.neo4j.graphdb.*;
-import org.neo4j.collection.primitive.Primitive;
-import org.neo4j.collection.primitive.PrimitiveLongSet;
-import org.neo4j.collection.primitive.PrimitiveLongIntMap;
-import org.neo4j.collection.primitive.PrimitiveLongIterator;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -221,7 +217,7 @@ public class Service {
                 final long startTime = System.currentTimeMillis();
                 final long maxEndTime = startTime + 12000; // TODO Make configurable
                 boolean timedOut = false;
-                
+
                 try (Transaction tx = db.beginTx()) {
                     final Long centerNodeId;
                     try {
@@ -241,57 +237,33 @@ public class Service {
                     }
 
                     int level = 1;
-                    PrimitiveLongSet idsForLevel = Primitive.longSet(1);
+                    LongSet idsForLevel = HashLongSets.newMutableSet();
                     idsForLevel.add(centerNodeId);
 
                     while (level <= maxLength && !edgeEmailsByNodeId.isEmpty() && !idsForLevel.isEmpty()) {
-                        // Get nodes at next level, counting by number of times they appear
-                        PrimitiveLongIntMap counter = Primitive.longIntMap(edgeEmailsByNodeId.size());
+                        HashLongIntMap counter = HashLongIntMaps.newMutableMap();
 
                         if (level < maxLength) {
-                            PrimitiveLongSet idsForNextLevel = Primitive.longSet(1 << (3+level)); // Default is 1 << 4, deeper levels probably get bigger
-                          
-                            PrimitiveLongIterator iter = idsForLevel.iterator();
-                            while(iter.hasNext()) {
-                                long id = iter.next();
-                                Node friend = db.getNodeById(id);
+                            // Get nodes at next level, counting by number of times they appear
+                            LongCursor longCursor = idsForLevel.cursor();
+                            while (longCursor.moveNext()) {
+                                Node friend = db.getNodeById(longCursor.elem());
                                 for (Relationship rel : friend.getRelationships()) {
-                                    Long nextId = rel.getOtherNode(friend).getId();
-                                    if (edgeEmailsByNodeId.containsKey(nextId)) {
-                                        // Only bother to count if it's a node we care about
-                                        int count = counter.get(nextId);
-                                        if (count <= 0) {
-                                            count = 1;
-                                        } else {
-                                            count++;
-                                        }
-                                        counter.put(nextId, count);
-                                    }
-
-                                    idsForNextLevel.add(nextId);
+                                    counter.addValue(rel.getOtherNode(friend).getId(), 1, 0);
                                 }
                             }
-                            
-                            idsForLevel = idsForNextLevel;
                         }
                         else {
+                            // Last level; get nodes, but only bother to count if it's a node we care about, and add timeout
                             int iterated = 0;
 
-                            PrimitiveLongIterator iter = idsForLevel.iterator();
-                            while(iter.hasNext()) {
-                                long id = iter.next();
-                                Node friend = db.getNodeById(id);
+                            LongCursor longCursor = idsForLevel.cursor();
+                            while (longCursor.moveNext()) {
+                                Node friend = db.getNodeById(longCursor.elem());
                                 for (Relationship rel : friend.getRelationships()) {
-                                    Long nextId = rel.getOtherNode(friend).getId();
-                                    if (edgeEmailsByNodeId.containsKey(nextId)) {
-                                        // Only bother to count if it's a node we care about
-                                        int count = counter.get(nextId);
-                                        if (count <= 0) {
-                                            count = 1;
-                                        } else {
-                                            count++;
-                                        }
-                                        counter.put(nextId, count);
+                                    Long id = rel.getOtherNode(friend).getId();
+                                    if (edgeEmailsByNodeId.containsKey(id)) {
+                                        counter.addValue(id, 1, 0);
                                     }
                                 }
 
@@ -304,18 +276,19 @@ public class Service {
                         }
 
                         // Now next level is current level; report any target nodes that appear, then stop searching for them
-                        PrimitiveLongIterator iter = counter.iterator();
-                        while (iter.hasNext()) {
-                            long id = iter.next();
+                        idsForLevel = counter.keySet();
+                        LongCursor longCursor = idsForLevel.cursor();
+                        while (longCursor.moveNext()) {
+                            if (edgeEmailsByNodeId.containsKey(longCursor.elem())) {
+                                jg.writeStartObject();
+                                jg.writeStringField("email", edgeEmailsByNodeId.get(longCursor.elem()));
+                                jg.writeNumberField("length", level);
+                                jg.writeNumberField("count", counter.get(longCursor.elem()));
+                                jg.writeEndObject();
+                                jg.writeRaw("\n");
 
-                            jg.writeStartObject();
-                            jg.writeStringField("email", edgeEmailsByNodeId.get(id));
-                            jg.writeNumberField("length", level);
-                            jg.writeNumberField("count", counter.get(id));
-                            jg.writeEndObject();
-                            jg.writeRaw("\n");
-
-                            edgeEmailsByNodeId.remove(id);
+                                edgeEmailsByNodeId.remove(longCursor.elem());
+                            }
                         }
                         jg.flush();
 
@@ -326,90 +299,11 @@ public class Service {
                         level++;
                     }
                 }
+
                 jg.close();
             }
         };
         return Response.ok().entity(stream).type(MediaType.APPLICATION_JSON).build();
     }
-
-    /**
-     * JSON formatted body requires:
-     *  center_email: An email address
-     *  edge_emails: An Array of email addresses
-     *  length: An integer representing the maximum traversal search length
-     */
-    @POST
-    @Path("/query_counters2")
-    public Response query_counters2(String body, @Context GraphDatabaseService db) throws IOException, ExecutionException {
-
-        StreamingOutput stream = new StreamingOutput() {
-            @Override
-            public void write(OutputStream os) throws IOException, WebApplicationException {
-                JsonGenerator jg = objectMapper.getJsonFactory().createJsonGenerator(os, JsonEncoding.UTF8);
-
-                // Validate our input or exit right away
-                HashMap input = getValidQueryInput(body);
-                int maxLength = (int) input.get("length");
-
-                try (Transaction tx = db.beginTx()) {
-                    final Long centerNodeId;
-                    try {
-                        centerNodeId = emails.get((String) input.get("center_email"));
-                    } catch (ExecutionException e) {
-                        jg.close();
-                        return;
-                    }
-
-                    final Map<Long,String> edgeEmailsByNodeId = new HashMap<>();
-                    for (String edgeEmail : (ArrayList<String>) input.get("edge_emails")) {
-                        try {
-                            edgeEmailsByNodeId.put(emails.get(edgeEmail), edgeEmail);
-                        } catch (Exception e) {
-                            continue;
-                        }
-                    }
-
-                    int level = 1;
-                    LongSet idsForlevel = HashLongSets.newMutableSet();
-                    idsForlevel.add((long)centerNodeId);
-
-                    while (level <= maxLength && !edgeEmailsByNodeId.isEmpty()) {
-                        // Get nodes at next level, counting by number of times they appear
-                        HashLongIntMap counter = HashLongIntMaps.newMutableMap();
-
-                        LongCursor longCursor = idsForlevel.cursor();
-                        while (longCursor.moveNext()) {
-                            Node friend = db.getNodeById(longCursor.elem());
-                            for (Relationship rel : friend.getRelationships()) {
-                                counter.addValue(rel.getOtherNode(friend).getId(), 1, 0);
-                            }
-                        }
-
-                        // Now next level is current level; report any target nodes that appear, then stop searching for them
-                        idsForlevel = counter.keySet();
-                        LongCursor longCursor2 = idsForlevel.cursor();
-                        while (longCursor2.moveNext()) {
-                            if (edgeEmailsByNodeId.containsKey(longCursor2.elem())) {
-                                jg.writeStartObject();
-                                jg.writeStringField("email", edgeEmailsByNodeId.get(longCursor2.elem()));
-                                jg.writeNumberField("length", level);
-                                jg.writeNumberField("count", counter.get(longCursor2.elem()));
-                                jg.writeEndObject();
-                                jg.writeRaw("\n");
-
-                                edgeEmailsByNodeId.remove(longCursor2.elem());
-                            }
-                        }
-                        jg.flush();
-
-                        level++;
-                    }
-                }
-                jg.close();
-            }
-        };
-        return Response.ok().entity(stream).type(MediaType.APPLICATION_JSON).build();
-    }
-
 
 }
