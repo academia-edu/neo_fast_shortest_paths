@@ -25,5 +25,6 @@ public class Exceptions extends WebApplicationException {
     public static Exceptions missingLengthParameter = new Exceptions(400, "Missing length Parameter.");
     public static Exceptions invalidLengthParameter = new Exceptions(400, "Invalid length Parameter.");
 
+    public static Exceptions timedOut = new Exceptions(420, "Timed out.");
 
 }

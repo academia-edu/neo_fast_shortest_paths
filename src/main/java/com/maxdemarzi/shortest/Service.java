@@ -212,6 +212,10 @@ public class Service {
                 // Validate our input or exit right away
                 HashMap input = getValidQueryInput(body);
                 int maxLength = (int) input.get("length");
+
+                final long startTime = System.currentTimeMillis();
+                final long maxEndTime = startTime + 12000; // TODO Make configurable
+                boolean timedOut = false;
                 
                 try (Transaction tx = db.beginTx()) {
                     final Long centerNodeId;
@@ -238,34 +242,64 @@ public class Service {
                     while (level <= maxLength && !edgeEmailsByNodeId.isEmpty() && !idsForLevel.isEmpty()) {
                         // Get nodes at next level, counting by number of times they appear
                         PrimitiveLongIntMap counter = Primitive.longIntMap(edgeEmailsByNodeId.size());
-                        PrimitiveLongSet idsForNextLevel = Primitive.longSet(1 << (3+level)); // Default is 1 << 4, deeper levels probably get bigger
 
-                        PrimitiveLongIterator iter = idsForLevel.iterator();
-                        while(iter.hasNext()) {
-                            long id = iter.next();
-                            Node friend = db.getNodeById(id);
-                            for (Relationship rel : friend.getRelationships()) {
-                                Long nextId = rel.getOtherNode(friend).getId();
-                                if (edgeEmailsByNodeId.containsKey(nextId)) {
-                                    // Only bother to count if it's a node we care about
-                                    int count = counter.get(nextId);
-                                    if (count <= 0) {
-                                        count = 1;
-                                    } else {
-                                        count++;
+                        if (level < maxLength) {
+                            PrimitiveLongSet idsForNextLevel = Primitive.longSet(1 << (3+level)); // Default is 1 << 4, deeper levels probably get bigger
+                          
+                            PrimitiveLongIterator iter = idsForLevel.iterator();
+                            while(iter.hasNext()) {
+                                long id = iter.next();
+                                Node friend = db.getNodeById(id);
+                                for (Relationship rel : friend.getRelationships()) {
+                                    Long nextId = rel.getOtherNode(friend).getId();
+                                    if (edgeEmailsByNodeId.containsKey(nextId)) {
+                                        // Only bother to count if it's a node we care about
+                                        int count = counter.get(nextId);
+                                        if (count <= 0) {
+                                            count = 1;
+                                        } else {
+                                            count++;
+                                        }
+                                        counter.put(nextId, count);
                                     }
-                                    counter.put(nextId, count);
+
+                                    idsForNextLevel.add(nextId);
+                                }
+                            }
+                            
+                            idsForLevel = idsForNextLevel;
+                        }
+                        else {
+                            int iterated = 0;
+
+                            PrimitiveLongIterator iter = idsForLevel.iterator();
+                            while(iter.hasNext()) {
+                                long id = iter.next();
+                                Node friend = db.getNodeById(id);
+                                for (Relationship rel : friend.getRelationships()) {
+                                    Long nextId = rel.getOtherNode(friend).getId();
+                                    if (edgeEmailsByNodeId.containsKey(nextId)) {
+                                        // Only bother to count if it's a node we care about
+                                        int count = counter.get(nextId);
+                                        if (count <= 0) {
+                                            count = 1;
+                                        } else {
+                                            count++;
+                                        }
+                                        counter.put(nextId, count);
+                                    }
                                 }
 
-                                if (level < maxLength) {
-                                    idsForNextLevel.add(nextId);
+                                iterated++;
+                                if (iterated % 1000 == 0 && System.currentTimeMillis() >= maxEndTime) {
+                                    timedOut = true;
+                                    break;
                                 }
                             }
                         }
 
                         // Now next level is current level; report any target nodes that appear, then stop searching for them
-                        idsForLevel = idsForNextLevel;
-                        iter = counter.iterator();
+                        PrimitiveLongIterator iter = counter.iterator();
                         while (iter.hasNext()) {
                             long id = iter.next();
 
@@ -279,6 +313,10 @@ public class Service {
                             edgeEmailsByNodeId.remove(id);
                         }
                         jg.flush();
+
+                        if (timedOut) {
+                            throw Exceptions.timedOut;
+                        }
 
                         level++;
                     }
