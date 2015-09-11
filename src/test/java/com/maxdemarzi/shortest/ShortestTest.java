@@ -190,7 +190,9 @@ public class ShortestTest {
 
         ArrayList actual = new ArrayList();
         for (String line : lines) {
-            actual.add(mapper.readValue(line, Map.class));
+            if (!line.trim().isEmpty()) {
+                actual.add(mapper.readValue(line, Map.class));
+            }
         }
 
         return actual;
