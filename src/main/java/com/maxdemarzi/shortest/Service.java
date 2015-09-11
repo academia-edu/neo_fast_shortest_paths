@@ -9,6 +9,10 @@ import org.codehaus.jackson.map.ObjectMapper;
 import org.neo4j.graphalgo.GraphAlgoFactory;
 import org.neo4j.graphalgo.PathFinder;
 import org.neo4j.graphdb.*;
+import org.neo4j.collection.primitive.Primitive;
+import org.neo4j.collection.primitive.PrimitiveLongSet;
+import org.neo4j.collection.primitive.PrimitiveLongIntMap;
+import org.neo4j.collection.primitive.PrimitiveLongIterator;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -222,38 +226,57 @@ public class Service {
                     for (String edgeEmail : (ArrayList<String>) input.get("edge_emails")) {
                         try {
                             edgeEmailsByNodeId.put(emails.get(edgeEmail), edgeEmail);
-                        } catch (Exception e) {
+                        } catch (ExecutionException e) {
                             continue;
                         }
                     }
 
                     int level = 1;
-                    Set<Long> idsForLevel = new HashSet<>();
+                    PrimitiveLongSet idsForLevel = Primitive.longSet(1);
                     idsForLevel.add(centerNodeId);
 
-                    while (level <= maxLength && !edgeEmailsByNodeId.isEmpty()) {
+                    while (level <= maxLength && !edgeEmailsByNodeId.isEmpty() && !idsForLevel.isEmpty()) {
                         // Get nodes at next level, counting by number of times they appear
-                        SimpleCounter<Long> counter = new SimpleCounter();
-                        for (Long id : idsForLevel) {
+                        PrimitiveLongIntMap counter = Primitive.longIntMap(edgeEmailsByNodeId.size());
+                        PrimitiveLongSet idsForNextLevel = Primitive.longSet(1 << (3+level)); // Default is 1 << 4, deeper levels probably get bigger
+
+                        PrimitiveLongIterator iter = idsForLevel.iterator();
+                        while(iter.hasNext()) {
+                            long id = iter.next();
                             Node friend = db.getNodeById(id);
                             for (Relationship rel : friend.getRelationships()) {
-                                counter.increment(rel.getOtherNode(friend).getId());
+                                Long nextId = rel.getOtherNode(friend).getId();
+                                if (edgeEmailsByNodeId.containsKey(nextId)) {
+                                    // Only bother to count if it's a node we care about
+                                    int count = counter.get(nextId);
+                                    if (count <= 0) {
+                                        count = 1;
+                                    } else {
+                                        count++;
+                                    }
+                                    counter.put(nextId, count);
+                                }
+
+                                if (level < maxLength) {
+                                    idsForNextLevel.add(nextId);
+                                }
                             }
                         }
 
                         // Now next level is current level; report any target nodes that appear, then stop searching for them
-                        idsForLevel = counter.getKeys();
-                        for (Long id : idsForLevel) {
-                            if (edgeEmailsByNodeId.containsKey(id)) {
-                                jg.writeStartObject();
-                                jg.writeStringField("email", edgeEmailsByNodeId.get(id));
-                                jg.writeNumberField("length", level);
-                                jg.writeNumberField("count", counter.getCount(id));
-                                jg.writeEndObject();
-                                jg.writeRaw("\n");
+                        idsForLevel = idsForNextLevel;
+                        iter = counter.iterator();
+                        while (iter.hasNext()) {
+                            long id = iter.next();
 
-                                edgeEmailsByNodeId.remove(id);
-                            }
+                            jg.writeStartObject();
+                            jg.writeStringField("email", edgeEmailsByNodeId.get(id));
+                            jg.writeNumberField("length", level);
+                            jg.writeNumberField("count", counter.get(id));
+                            jg.writeEndObject();
+                            jg.writeRaw("\n");
+
+                            edgeEmailsByNodeId.remove(id);
                         }
                         jg.flush();
 
