@@ -5,6 +5,7 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import net.openhft.koloboke.collect.LongCursor;
 import net.openhft.koloboke.collect.map.LongObjCursor;
+import net.openhft.koloboke.collect.map.LongIntCursor;
 import net.openhft.koloboke.collect.map.hash.HashLongIntMap;
 import net.openhft.koloboke.collect.map.hash.HashLongIntMaps;
 import net.openhft.koloboke.collect.map.hash.HashLongObjMap;
@@ -220,8 +221,10 @@ public class Service {
                 int length = (int) input.get("length");
 
                 if (edgeEmails.size() <= length) {
+                    // There are few target nodes, so search using the built-in algorithm which (presumably) does a BFS from each end for each
                     streamShortestPathsUsingBuiltinAlgo(centerEmail, edgeEmails, length, jg);
                 } else {
+                    // There are many target nodes, so search using a BFS only from the source node
                     streamShortestPathsUsingHandwrittenBFS(centerEmail, edgeEmails, length, jg);
                 }
 
@@ -294,57 +297,71 @@ public class Service {
             }
 
             int level = 1;
-            LongSet idsForLevel = HashLongSets.newMutableSet();
-            idsForLevel.add((long) centerNodeId);
+            HashLongIntMap pathsToLastLevel = HashLongIntMaps.newMutableMapOf(centerNodeId, 1);
+            final LongSet previouslySeen = HashLongSets.newMutableSet();
             
             Cursor<NodeItem> nodeCursor;
             Cursor<RelationshipItem> relationshipCursor;
-            LongCursor longCursor;
+            LongIntCursor longIntCursor;
 
-            while (level <= maxLength && !edgeEmailsByNodeId.isEmpty() && !idsForLevel.isEmpty()) {
+            while (level <= maxLength && !edgeEmailsByNodeId.isEmpty() && !pathsToLastLevel.isEmpty()) {
                 if (level < maxLength) {
                     // Get nodes at next level, counting by number of times they appear
-                    HashLongIntMap counter = HashLongIntMaps.newMutableMap();
-                    longCursor = idsForLevel.cursor();
-                    while (longCursor.moveNext()) {
-                        nodeCursor = ops.nodeCursor(longCursor.elem());
+                    HashLongIntMap pathsToNextLevel = HashLongIntMaps.newMutableMap();
+                    longIntCursor = pathsToLastLevel.cursor();
+                    while (longIntCursor.moveNext()) {
+                        long nodeId = longIntCursor.key();
+                        int pathCount = longIntCursor.value();
+
+                        nodeCursor = ops.nodeCursor(nodeId);
                         nodeCursor.next();
                         relationshipCursor = nodeCursor.get().relationships(Direction.BOTH);
 
                         while (relationshipCursor.next()) {
-                            counter.addValue(relationshipCursor.get().otherNode(longCursor.elem()), 1, 0);
+                            long otherId = relationshipCursor.get().otherNode(nodeId);
+                            if (!previouslySeen.contains(otherId)) {
+                                pathsToNextLevel.addValue(otherId, pathCount, 0);
+                            }
                         }
                     }
 
-                    // Now next level is current level; report any target nodes that appear, then stop searching for them
-                    idsForLevel = counter.keySet();
-                    longCursor = idsForLevel.cursor();
-                    while (longCursor.moveNext()) {
-                        if (edgeEmailsByNodeId.containsKey(longCursor.elem())) {
-                            String email = edgeEmailsByNodeId.get(longCursor.elem());
-                            writeResultObject(jg, email, level, counter.get(longCursor.elem()));
-                            edgeEmailsByNodeId.remove(longCursor.elem());
+                    // Now next level is current level; store visited nodes to prevent re-visiting cycles,
+                    // report any target nodes that appear, then stop searching for them
+                    previouslySeen.addAll(pathsToLastLevel.keySet());
+                    pathsToLastLevel = pathsToNextLevel;
+                    longIntCursor = pathsToLastLevel.cursor();
+                    while (longIntCursor.moveNext()) {
+                        long nodeId = longIntCursor.key();
+
+                        if (edgeEmailsByNodeId.containsKey(nodeId)) {
+                            String email = edgeEmailsByNodeId.remove(nodeId);
+                            writeResultObject(jg, email, level, longIntCursor.value());
                         }
                     }
                 } else {
                     // Last level; get nodes, but only bother to count if it's a node we care about,
                     // and look up neighbors of each edge node instead of continuing breadth-first search
-                    // outwards from original center, because there are probably fewer lookups this way
+                    // outwards from original center, because there are probably fewer lookups this way,
+                    // and it lets us stream results
                     LongObjCursor<String> longObjCursor = edgeEmailsByNodeId.cursor();
                     while (longObjCursor.moveNext()) {
-                        nodeCursor = ops.nodeCursor(longObjCursor.key());
+                        long nodeId = longObjCursor.key();
+                        int pathCount = 0;
+
+                        nodeCursor = ops.nodeCursor(nodeId);
                         nodeCursor.next();
                         relationshipCursor = nodeCursor.get().relationships(Direction.BOTH);
-                            
-                        int count = 0;
+
                         while (relationshipCursor.next()) {
-                            if (idsForLevel.contains(relationshipCursor.get().otherNode(longObjCursor.key()))) {
-                                count++;
+                            long otherId = relationshipCursor.get().otherNode(nodeId);
+
+                            if (pathsToLastLevel.containsKey(otherId)) {
+                                pathCount = pathCount + pathsToLastLevel.get(otherId);
                             }
                         }
 
-                        if (count > 0) {
-                            writeResultObject(jg, longObjCursor.value(), level, count);
+                        if (pathCount > 0) {
+                            writeResultObject(jg, longObjCursor.value(), level, pathCount);
                         }
                     }
                 }
