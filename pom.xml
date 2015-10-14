@@ -6,7 +6,7 @@
 
     <groupId>com.maxdemarzi</groupId>
     <artifactId>faster-shortest-paths</artifactId>
-    <version>2.0</version>
+    <version>3.0</version>
 
     <properties>
         <neo4j.version>2.3-SNAPSHOT</neo4j.version>

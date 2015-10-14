@@ -22,6 +22,10 @@ public class Validators {
         if (!input.containsKey("center_email")) {
             throw Exceptions.missingCenterEmailParameter;
         }
+        // Make sure it has a bibliography_entries parameter
+        if (!input.containsKey("bibliography_entries")) {
+            throw Exceptions.missingBibliographyEntriesParameter;
+        }
         // Make sure it has a edge_emails parameter
         if (!input.containsKey("edge_emails")) {
             throw Exceptions.missingEdgeEmailsParameter;
@@ -34,6 +38,10 @@ public class Validators {
         // Make sure the center_email is not blank
         if (input.get("center_email") == "") {
             throw Exceptions.invalidCenterEmailParameter;
+        }
+        // Make sure the bibliography_entries is not blank
+        if (input.get("bibliography_entries") == "") {
+            throw Exceptions.invalidBibliographyEntriesParameter;
         }
         // Make sure the edge_emails is not blank
         if (input.get("edge_emails") == "") {

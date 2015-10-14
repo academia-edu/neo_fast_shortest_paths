@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
+import java.lang.Iterable;
 
 import static com.maxdemarzi.shortest.Validators.getValidQueryInput;
 
@@ -67,6 +68,23 @@ public class Service {
             return node.getId();
         } else {
             throw new Exception("Email not found");
+        }
+    }
+
+    private static final LoadingCache<String, Long> bibliographyEntries = CacheBuilder.newBuilder()
+        .maximumSize(1_000_000)
+        .build(new CacheLoader<String, Long>() {
+                    public Long load(String bibId) throws Exception {
+                        return getBibliographyEntryNodeId(bibId);
+                    }
+                });
+
+    private static Long getBibliographyEntryNodeId(String bibId) throws Exception{
+        final Node node = db.findNode(Labels.BibliographyEntry, "id", Long.valueOf(bibId));
+        if (node != null) {
+            return node.getId();
+        } else {
+            throw new Exception("BibliographyEntry not found");
         }
     }
 
@@ -158,9 +176,10 @@ public class Service {
 
                 String centerEmail = (String) input.get("center_email");
                 List<String> edgeEmails = (ArrayList<String>) input.get("edge_emails");
+                List<String> bibEntries = (ArrayList<String>) input.get("bibliography_entries");
                 int length = (int) input.get("length");
 
-                streamShortestPathsUsingBuiltinAlgo(centerEmail, edgeEmails, length, jg);
+                streamShortestPathsUsingBuiltinAlgo(centerEmail, bibEntries, edgeEmails, length, jg);
 
                 jg.close();
             }
@@ -188,9 +207,10 @@ public class Service {
 
                 String centerEmail = (String) input.get("center_email");
                 List<String> edgeEmails = (ArrayList<String>) input.get("edge_emails");
+                List<String> bibEntries = (ArrayList<String>) input.get("bibliography_entries");
                 int length = (int) input.get("length");
 
-                streamShortestPathsUsingHandwrittenBFS(centerEmail, edgeEmails, length, jg);
+                streamShortestPathsUsingHandwrittenBFS(centerEmail, bibEntries, edgeEmails, length, jg);
 
                 jg.close();
             }
@@ -217,15 +237,16 @@ public class Service {
                 HashMap input = getValidQueryInput(body);
 
                 String centerEmail = (String) input.get("center_email");
+                List<String> bibEntries = (ArrayList<String>) input.get("bibliography_entries");
                 List<String> edgeEmails = (ArrayList<String>) input.get("edge_emails");
                 int length = (int) input.get("length");
 
                 if (edgeEmails.size() <= length) {
                     // There are few target nodes, so search using the built-in algorithm which (presumably) does a BFS from each end for each
-                    streamShortestPathsUsingBuiltinAlgo(centerEmail, edgeEmails, length, jg);
+                    streamShortestPathsUsingBuiltinAlgo(centerEmail, bibEntries, edgeEmails, length, jg);
                 } else {
                     // There are many target nodes, so search using a BFS only from the source node
-                    streamShortestPathsUsingHandwrittenBFS(centerEmail, edgeEmails, length, jg);
+                    streamShortestPathsUsingHandwrittenBFS(centerEmail, bibEntries, edgeEmails, length, jg);
                 }
 
                 jg.close();
@@ -234,8 +255,39 @@ public class Service {
         return Response.ok().entity(stream).type(MediaType.APPLICATION_JSON).build();
     }
 
-    private void streamShortestPathsUsingBuiltinAlgo(String centerEmail, List<String> edgeEmails, int maxLength, JsonGenerator jg) throws IOException {
-        final List<Node> edgeEmailNodes = new ArrayList<>();
+    private static final List<Long> nodeIdsForBibliographyEntries(Collection<String> bibEntries) {
+        List<Long> nodeIds = new ArrayList<>(bibEntries.size());
+        for (String bibId : bibEntries) {
+            try {
+                nodeIds.add(bibliographyEntries.get(bibId));
+            } catch (ExecutionException e) {
+                continue;
+            }
+        }
+        return nodeIds;
+    }
+
+    private static final List<Long> nodeIdsForEmails(Collection<String> emailSet) {
+        List<Long> nodeIds = new ArrayList<>(emailSet.size());
+        for (String email : emailSet) {
+            try {
+                nodeIds.add(emails.get(email));
+            } catch (ExecutionException e) {
+                continue;
+            }
+        }
+        return nodeIds;
+    }
+
+    private static final List<Node> nodesById(Iterable<Long> ids) {
+        List<Node> nodes = new ArrayList<>();
+        for (Long id : ids) {
+            nodes.add(db.getNodeById(id));
+        }
+        return nodes;
+    }
+
+    private void streamShortestPathsUsingBuiltinAlgo(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxLength, JsonGenerator jg) throws IOException {
 
         try (Transaction tx = db.beginTx()) {
             final Node centerNode;
@@ -244,38 +296,45 @@ public class Service {
             } catch (ExecutionException e) {
                 return;
             }
-            for (String edgeEmail : edgeEmails) {
-                Long id;
-                try {
-                    id = emails.get(edgeEmail);
-                } catch (Exception e) {
-                    continue;
-                }
-                edgeEmailNodes.add(db.getNodeById(id));
-            }
+            final Collection<Node> edgeEmailNodes = nodesById(nodeIdsForEmails(edgeEmails));
+            final Collection<Node> bibEntryNodes = nodesById(nodeIdsForBibliographyEntries(bibEntries));
 
             PathExpander<?> expander = PathExpanders.allTypesAndDirections();
             PathFinder<org.neo4j.graphdb.Path> shortestPath = GraphAlgoFactory.shortestPath(expander, maxLength);
+            PathFinder<org.neo4j.graphdb.Path> shortestPathViaBib = GraphAlgoFactory.shortestPath(expander, maxLength - 1);
 
             for (Node edgeEmail : edgeEmailNodes) {
                 HashMap<String, Object> result = new HashMap<>();
                 int length = 0;
                 int count = 0;
-                for ( org.neo4j.graphdb.Path path : shortestPath.findAllPaths( centerNode, edgeEmail ) )
-                {
+                for (org.neo4j.graphdb.Path path : shortestPath.findAllPaths(centerNode, edgeEmail)) {
                     length = path.length();
                     count++;
+                }
+                for (Node bibEntry : bibEntryNodes) {
+                    for (org.neo4j.graphdb.Path path : shortestPathViaBib.findAllPaths(bibEntry, edgeEmail)) {
+                        int pathLength = path.length() + 1;
+                        if (length != 0 && pathLength > length) {
+                            break;
+                        }
+                        if (pathLength < length) {
+                            // we found a shorter path via the bib entry, reset count
+                            count = 0;
+                        }
+                        length = pathLength;
+                        count++;
+                    }
                 }
 
                 if (length > 0 && count > 0) {
                     String email = (String) edgeEmail.getProperty("email", "");
-                    writeResultObject(jg, email, length, count); 
+                    writeResultObject(jg, email, length, count);
                 }
             }
         }
     }
 
-    private void streamShortestPathsUsingHandwrittenBFS(String centerEmail, List<String> edgeEmails, int maxLength, JsonGenerator jg) throws IOException {
+    private void streamShortestPathsUsingHandwrittenBFS(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxLength, JsonGenerator jg) throws IOException {
         try (Transaction tx = db.beginTx()) {
             ThreadToStatementContextBridge ctx = dbAPI.getDependencyResolver().resolveDependency(ThreadToStatementContextBridge.class);
             ReadOperations ops = ctx.get().readOperations();
@@ -286,6 +345,7 @@ public class Service {
             } catch (ExecutionException e) {
                 return;
             }
+            List<Long> bibliographyNodeIds = nodeIdsForBibliographyEntries(bibEntries);
 
             final HashLongObjMap<String> edgeEmailsByNodeId = HashLongObjMaps.newMutableMap();
             for (String edgeEmail : edgeEmails) {
@@ -299,15 +359,15 @@ public class Service {
             int level = 1;
             HashLongIntMap pathsToLastLevel = HashLongIntMaps.newMutableMapOf(centerNodeId, 1);
             final LongSet previouslySeen = HashLongSets.newMutableSet();
-            
+
             Cursor<NodeItem> nodeCursor;
             Cursor<RelationshipItem> relationshipCursor;
             LongIntCursor longIntCursor;
 
             while (level <= maxLength && !edgeEmailsByNodeId.isEmpty() && !pathsToLastLevel.isEmpty()) {
                 if (level < maxLength) {
-                    // Get nodes at next level, counting by number of times they appear
                     HashLongIntMap pathsToNextLevel = HashLongIntMaps.newMutableMap();
+                    // Get nodes at next level, counting by number of times they appear
                     longIntCursor = pathsToLastLevel.cursor();
                     while (longIntCursor.moveNext()) {
                         long nodeId = longIntCursor.key();
@@ -322,6 +382,13 @@ public class Service {
                             if (!previouslySeen.contains(otherId)) {
                                 pathsToNextLevel.addValue(otherId, pathCount, 0);
                             }
+                        }
+                    }
+
+                    if (level == 1) {
+                        // Pretend there are length 1 paths to the bibliograpahy entries
+                        for (Long bibId : bibliographyNodeIds) {
+                            pathsToNextLevel.putIfAbsent(bibId, Integer.valueOf(1));
                         }
                     }
 

@@ -184,6 +184,36 @@ public class ShortestTest {
         assertArrayEquals(expected.toArray(), actual.toArray());
     }
 
+    @Test
+    public void shouldFindShortestPathViaBibOne() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_streaming").toString(),
+                QUERY_BIB_ONE_MAP);
+
+        String raw = response.rawContent();
+        Map<String,Object> actual = mapper.readValue(raw, Map.class);
+        assertEquals(BIB_ONE_MAP, actual);
+    }
+
+    @Test
+    public void shouldFindShortestPathViaBibTwo() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_counters").toString(),
+                QUERY_BIB_TWO_MAP);
+
+        String raw = response.rawContent();
+        Map<String,Object> actual = mapper.readValue(raw, Map.class);
+        assertEquals(BIB_TWO_MAP, actual);
+    }
+
+    @Test
+    public void shouldFindShortestPathViaBibThree() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_streaming").toString(),
+                QUERY_BIB_THREE_MAP);
+
+        String raw = response.rawContent();
+        Map<String,Object> actual = mapper.readValue(raw, Map.class);
+        assertEquals(BIB_THREE_MAP, actual);
+    }
+
     private ArrayList parseNewlineSeparated(HTTP.Response response) throws Exception {
         String raw = response.rawContent();
         String[] lines = raw.split("\n");
@@ -210,6 +240,9 @@ public class ShortestTest {
                     .append("CREATE (six:Email {email:'six@maxdemarzi.com'})")
                     .append("CREATE (seven:Email {email:'seven@maxdemarzi.com'})")
                     .append("CREATE (eight:Email {email:'eight@maxdemarzi.com'})")
+                    .append("CREATE (oneBibMail:Email {email:'onebibmail@maxdemarzi.com'})")
+                    .append("CREATE (twoBibMail:Email {email:'twobibmail@maxdemarzi.com'})")
+                    .append("CREATE (threeBibMail:Email {email:'threebibmail@maxdemarzi.com'})")
                     .append("CREATE (start)-[:CONNECTS]->(one)")
                     .append("CREATE (one)-[:CONNECTS]->(two)")
                     .append("CREATE (one)-[:CONNECTS]->(three)")
@@ -219,10 +252,15 @@ public class ShortestTest {
                     .append("CREATE (two)-[:CONNECTS]->(six)")
                     .append("CREATE (six)-[:CONNECTS]->(seven)")
                     .append("CREATE (seven)-[:CONNECTS]->(eight)")
+                    .append("CREATE (oneBib:BibliographyEntry {id: 1})")
+                    .append("CREATE (oneBib)-[:CONNECTS]->(oneBibMail)")
+                    .append("CREATE (twoBibMail)-[:CONNECTS]->(oneBibMail)")
+                    .append("CREATE (threeBibMail)-[:CONNECTS]->(twoBibMail)")
                     .toString();
 
     public static HashMap<String, Object> QUERY_ONE_MAP = new HashMap<String, Object>(){{
         put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
         put("edge_emails", new ArrayList<String>() {{  add("one@maxdemarzi.com");} });
         put("length", 4);
     }};
@@ -235,6 +273,7 @@ public class ShortestTest {
 
     public static HashMap<String, Object> QUERY_TWO_MAP = new HashMap<String, Object>(){{
         put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
         put("edge_emails", new ArrayList<String>() {{
             add("one@maxdemarzi.com");
             add("two@maxdemarzi.com");
@@ -250,6 +289,7 @@ public class ShortestTest {
 
     public static HashMap<String, Object> QUERY_THREE_MAP = new HashMap<String, Object>(){{
         put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
         put("edge_emails", new ArrayList<String>() {{
             add("five@maxdemarzi.com");
         }});
@@ -264,6 +304,7 @@ public class ShortestTest {
 
     public static HashMap<String, Object> QUERY_FOUR_MAP = new HashMap<String, Object>(){{
         put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
         put("edge_emails", new ArrayList<String>() {{
             add("five@maxdemarzi.com");
             add("sixty@maxdemarzi.com");
@@ -273,6 +314,7 @@ public class ShortestTest {
 
     public static HashMap<String, Object> QUERY_NO_CENTER_EMAIL_MAP = new HashMap<String, Object>(){{
         put("center_email", "missing@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
         put("edge_emails", new ArrayList<String>() {{
             add("five@maxdemarzi.com");
             add("start@maxdemarzi.com");
@@ -288,12 +330,14 @@ public class ShortestTest {
 
     public static HashMap<String, Object> QUERY_NO_PATH_MAP = new HashMap<String, Object>(){{
         put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
         put("edge_emails", new ArrayList<String>() {{  add("unconnected@maxdemarzi.com");} });
         put("length", 4);
     }};
 
     public static HashMap<String, Object> QUERY_FIVE_MAP = new HashMap<String, Object>(){{
         put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
         put("edge_emails", new ArrayList<String>() {{
             add("seven@maxdemarzi.com");
             add("eight@maxdemarzi.com");
@@ -303,6 +347,51 @@ public class ShortestTest {
 
     static HashMap<String, Object> FIVE_MAP = new HashMap<String, Object>(){{
         put("email", "seven@maxdemarzi.com");
+        put("length", 4);
+        put("count", 1);
+    }};
+
+    public static HashMap<String, Object> QUERY_BIB_ONE_MAP = new HashMap<String, Object>(){{
+        put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>() {{ add("1");} });
+        put("edge_emails", new ArrayList<String>() {{
+            add("onebibmail@maxdemarzi.com");
+        }});
+        put("length", 4);
+    }};
+
+    static HashMap<String, Object> BIB_ONE_MAP = new HashMap<String, Object>(){{
+        put("email", "onebibmail@maxdemarzi.com");
+        put("length", 2);
+        put("count", 1);
+    }};
+
+    public static HashMap<String, Object> QUERY_BIB_TWO_MAP = new HashMap<String, Object>(){{
+        put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>() {{ add("1");} });
+        put("edge_emails", new ArrayList<String>() {{
+            add("twobibmail@maxdemarzi.com");
+        }});
+        put("length", 4);
+    }};
+
+    static HashMap<String, Object> BIB_TWO_MAP = new HashMap<String, Object>(){{
+        put("email", "twobibmail@maxdemarzi.com");
+        put("length", 3);
+        put("count", 1);
+    }};
+
+    public static HashMap<String, Object> QUERY_BIB_THREE_MAP = new HashMap<String, Object>(){{
+        put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>() {{ add("1");} });
+        put("edge_emails", new ArrayList<String>() {{
+            add("threebibmail@maxdemarzi.com");
+        }});
+        put("length", 4);
+    }};
+
+    static HashMap<String, Object> BIB_THREE_MAP = new HashMap<String, Object>(){{
+        put("email", "threebibmail@maxdemarzi.com");
         put("length", 4);
         put("count", 1);
     }};

@@ -19,6 +19,9 @@ public class Exceptions extends WebApplicationException {
     public static Exceptions missingCenterEmailParameter = new Exceptions(400, "Missing center_email Parameter.");
     public static Exceptions invalidCenterEmailParameter = new Exceptions(400, "Invalid center_email Parameter.");
 
+    public static Exceptions missingBibliographyEntriesParameter = new Exceptions(400, "Missing bibliography_entries Parameter.");
+    public static Exceptions invalidBibliographyEntriesParameter = new Exceptions(400, "Invalid bibliography_entries Parameter.");
+
     public static Exceptions missingEdgeEmailsParameter = new Exceptions(400, "Missing edge_email Parameter.");
     public static Exceptions invalidEdgeEmailsParameter = new Exceptions(400, "Invalid edge_email Parameter.");
 
