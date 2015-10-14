@@ -388,7 +388,7 @@ public class Service {
                     if (level == 1) {
                         // Pretend there are length 1 paths to the bibliograpahy entries
                         for (Long bibId : bibliographyNodeIds) {
-                            pathsToNextLevel.putIfAbsent(bibId, Integer.valueOf(1));
+                            pathsToNextLevel.putIfAbsent(bibId.longValue(), 1);
                         }
                     }
 
