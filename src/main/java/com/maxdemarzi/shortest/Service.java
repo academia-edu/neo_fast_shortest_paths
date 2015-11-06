@@ -3,6 +3,8 @@ package com.maxdemarzi.shortest;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import com.google.common.collect.ImmutableMap;
+
 import net.openhft.koloboke.collect.LongCursor;
 import net.openhft.koloboke.collect.map.LongObjCursor;
 import net.openhft.koloboke.collect.map.LongIntCursor;
@@ -12,6 +14,7 @@ import net.openhft.koloboke.collect.map.hash.HashLongObjMap;
 import net.openhft.koloboke.collect.map.hash.HashLongObjMaps;
 import net.openhft.koloboke.collect.set.LongSet;
 import net.openhft.koloboke.collect.set.hash.HashLongSets;
+
 import org.codehaus.jackson.JsonEncoding;
 import org.codehaus.jackson.JsonGenerator;
 import org.codehaus.jackson.map.ObjectMapper;
@@ -19,6 +22,7 @@ import org.neo4j.cursor.Cursor;
 import org.neo4j.graphalgo.GraphAlgoFactory;
 import org.neo4j.graphalgo.PathFinder;
 import org.neo4j.graphdb.*;
+
 import org.neo4j.kernel.GraphDatabaseAPI;
 import org.neo4j.kernel.api.ReadOperations;
 import org.neo4j.kernel.api.cursor.NodeItem;
@@ -33,6 +37,7 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.StreamingOutput;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.*;
@@ -48,27 +53,12 @@ public class Service {
     private static GraphDatabaseService db;
     private final GraphDatabaseAPI dbAPI;
 
+    private final NodeCache nodeCache;
+
     public Service(@Context GraphDatabaseService graphDatabaseService) {
         db = graphDatabaseService;
         dbAPI = (GraphDatabaseAPI) db;
-    }
-
-    private static final LoadingCache<String, Long> emails = CacheBuilder.newBuilder()
-            .maximumSize(1_000_000)
-            .build(
-                    new CacheLoader<String, Long>() {
-                        public Long load(String email) throws Exception {
-                            return getEmailNodeId(email);
-                        }
-                    });
-
-    private static Long getEmailNodeId(String email) throws Exception{
-        final Node node = db.findNode(Labels.Email, "email", email);
-        if (node != null) {
-            return node.getId();
-        } else {
-            throw new Exception("Email not found");
-        }
+        nodeCache = new NodeCache(db, 1_000_000);
     }
 
     private static final LoadingCache<String, Long> bibliographyEntries = CacheBuilder.newBuilder()
@@ -115,7 +105,7 @@ public class Service {
         try (Transaction tx = db.beginTx()) {
             final Node centerNode;
             try {
-                centerNode = db.getNodeById(emails.get((String) input.get("center_email")));
+                centerNode = db.getNodeById(nodeCache.getEmailNode((String) input.get("center_email")));
             } catch (ExecutionException e) {
                 return Response.ok().entity("[]").build();
             }
@@ -123,7 +113,7 @@ public class Service {
             for (String edgeEmail : (ArrayList<String>)input.get("edge_emails")) {
                 Long edgeId;
                 try {
-                    edgeId = emails.get(edgeEmail);
+                    edgeId = nodeCache.getEmailNode(edgeEmail);
                 } catch (Exception e) {
                     continue;
                 }
@@ -255,30 +245,6 @@ public class Service {
         return Response.ok().entity(stream).type(MediaType.APPLICATION_JSON).build();
     }
 
-    private static final List<Long> nodeIdsForBibliographyEntries(Collection<String> bibEntries) {
-        List<Long> nodeIds = new ArrayList<>(bibEntries.size());
-        for (String bibId : bibEntries) {
-            try {
-                nodeIds.add(bibliographyEntries.get(bibId));
-            } catch (ExecutionException e) {
-                continue;
-            }
-        }
-        return nodeIds;
-    }
-
-    private static final List<Long> nodeIdsForEmails(Collection<String> emailSet) {
-        List<Long> nodeIds = new ArrayList<>(emailSet.size());
-        for (String email : emailSet) {
-            try {
-                nodeIds.add(emails.get(email));
-            } catch (ExecutionException e) {
-                continue;
-            }
-        }
-        return nodeIds;
-    }
-
     private static final List<Node> nodesById(Iterable<Long> ids) {
         List<Node> nodes = new ArrayList<>();
         for (Long id : ids) {
@@ -292,12 +258,13 @@ public class Service {
         try (Transaction tx = db.beginTx()) {
             final Node centerNode;
             try {
-                centerNode = db.getNodeById(emails.get(centerEmail));
+                centerNode = db.getNodeById(nodeCache.getEmailNode(centerEmail));
             } catch (ExecutionException e) {
                 return;
             }
-            final Collection<Node> edgeEmailNodes = nodesById(nodeIdsForEmails(edgeEmails));
-            final Collection<Node> bibEntryNodes = nodesById(nodeIdsForBibliographyEntries(bibEntries));
+
+            final Collection<Node> edgeEmailNodes = nodesById(nodeCache.getEmailNodes(edgeEmails));
+            final Collection<Node> bibEntryNodes = nodesById(nodeCache.getBibliographEntryNodes(bibEntries));
 
             PathExpander<?> expander = PathExpanders.allTypesAndDirections();
             PathFinder<org.neo4j.graphdb.Path> shortestPath = GraphAlgoFactory.shortestPath(expander, maxLength);
@@ -341,16 +308,16 @@ public class Service {
 
             final Long centerNodeId;
             try {
-                centerNodeId = emails.get(centerEmail);
+                centerNodeId = nodeCache.getEmailNode(centerEmail);
             } catch (ExecutionException e) {
                 return;
             }
-            List<Long> bibliographyNodeIds = nodeIdsForBibliographyEntries(bibEntries);
+            List<Long> bibliographyNodeIds = nodeCache.getBibliographEntryNodes(bibEntries);
 
             final HashLongObjMap<String> edgeEmailsByNodeId = HashLongObjMaps.newMutableMap();
             for (String edgeEmail : edgeEmails) {
                 try {
-                    edgeEmailsByNodeId.put(emails.get(edgeEmail), edgeEmail);
+                    edgeEmailsByNodeId.put(nodeCache.getEmailNode(edgeEmail), edgeEmail);
                 } catch (Exception e) {
                     continue;
                 }
@@ -438,6 +405,59 @@ public class Service {
         }
     }
 
+    private static final Map<String, Integer> relationshipCosts = ImmutableMap.<String, Integer>builder()
+        .put("EqualTo", 1)
+        .put("AuthoredBy", 1)
+        .put("CoAuthorOf", 1)
+        .put("ContainsEmail", 1)
+        .put("Follows", 1)
+        .put("hasContact", 1)
+        .put("HasEmail", 1)
+        .put("HasUrl", 1)
+        .build();
+
+    private void streamShortestPathsUsingDijkstra(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxLength, JsonGenerator jg) {
+        final Long centerNodeId;
+        try {
+            centerNodeId = nodeCache.getEmailNode(centerEmail);
+        } catch (ExecutionException e) {
+            return;
+        }
+        Collection<Long> startNodes = nodeCache.getBibliographEntryNodes(bibEntries);
+        startNodes.add(centerNodeId);
+
+        final HashLongObjMap<String> edgeEmailsByNodeId = HashLongObjMaps.newMutableMap();
+        for (String edgeEmail : edgeEmails) {
+            try {
+                edgeEmailsByNodeId.put(nodeCache.getEmailNode(edgeEmail), edgeEmail);
+            } catch (Exception e) {
+                continue;
+            }
+        }
+
+        try (Transaction tx = db.beginTx()) {
+            ThreadToStatementContextBridge ctx = dbAPI.getDependencyResolver().resolveDependency(ThreadToStatementContextBridge.class);
+            ReadOperations ops = ctx.get().readOperations();
+
+            new Dijkstra(ops, relationshipCosts, startNodes, 4, new Dijkstra.NodeCallback() {
+                public void explored(Dijkstra traveral, NodeItem node, long nodeId, int cost, int paths) {
+                    String email = edgeEmailsByNodeId.remove(nodeId);
+                    if (email != null) { //found a match!
+                        try {
+                            writeResultObject(jg, email, cost, paths);
+                        } catch(IOException ex) {
+                            traveral.finish();
+                            return;
+                        }
+                        if (edgeEmailsByNodeId.isEmpty()) {
+                            traveral.finish();
+                        }
+                    }
+                }
+            }).run();
+        }
+    }
+
     private void writeResultObject(JsonGenerator jg, String email, int length, int count) throws IOException {
         jg.writeStartObject();
         jg.writeStringField("email", email);
@@ -447,5 +467,4 @@ public class Service {
         jg.writeRaw("\n");
         jg.flush();
     }
-
 }
