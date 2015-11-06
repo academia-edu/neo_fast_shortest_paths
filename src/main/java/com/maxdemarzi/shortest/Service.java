@@ -440,17 +440,17 @@ public class Service {
             ReadOperations ops = ctx.get().readOperations();
 
             new Dijkstra(ops, relationshipCosts, startNodes, 4, new Dijkstra.NodeCallback() {
-                public void explored(Dijkstra traveral, NodeItem node, long nodeId, int cost, int paths) {
+                public void explored(Dijkstra traversal, NodeItem node, long nodeId, int cost, int paths) {
                     String email = edgeEmailsByNodeId.remove(nodeId);
                     if (email != null) { //found a match!
                         try {
                             writeResultObject(jg, email, cost, paths);
                         } catch(IOException ex) {
-                            traveral.finish();
+                            traversal.finish();
                             return;
                         }
                         if (edgeEmailsByNodeId.isEmpty()) {
-                            traveral.finish();
+                            traversal.finish();
                         }
                     }
                 }
