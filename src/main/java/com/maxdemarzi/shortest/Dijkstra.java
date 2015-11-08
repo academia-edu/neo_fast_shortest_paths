@@ -1,7 +1,6 @@
 package com.maxdemarzi.shortest;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Map.Entry;
 import java.util.PriorityQueue;
 import java.util.Map;
@@ -14,17 +13,10 @@ import org.neo4j.kernel.api.cursor.RelationshipItem;
 
 import net.openhft.koloboke.collect.map.IntIntMap;
 import net.openhft.koloboke.collect.map.IntIntMapFactory;
-import net.openhft.koloboke.collect.map.hash.HashIntIntMap;
 import net.openhft.koloboke.collect.map.hash.HashIntIntMaps;
-import net.openhft.koloboke.collect.map.hash.HashLongIntMap;
 import net.openhft.koloboke.collect.map.hash.HashLongLongMap;
 import net.openhft.koloboke.collect.map.hash.HashLongLongMaps;
-import net.openhft.koloboke.collect.map.hash.HashLongObjMap;
-import net.openhft.koloboke.collect.map.hash.HashLongObjMaps;
-import net.openhft.koloboke.collect.set.hash.HashLongSet;
-import net.openhft.koloboke.collect.set.hash.HashLongSets;
-import net.openhft.koloboke.function.Consumer;
-import net.openhft.koloboke.function.IntIntConsumer;
+import net.openhft.koloboke.function.LongBinaryOperator;
 
 public final class Dijkstra {
 
@@ -40,26 +32,61 @@ public final class Dijkstra {
 
     private final PriorityQueue<Step> queue;
     private final HashLongLongMap paths;
-    private final HashLongSet explored;
 
     /*
-     * To avoid having to store a map of NodeId -> Cost + Paths
-     * where the value is an object, we compress the cost and paths
-     * into a long. Path count is dependent on the distance
-     * Probably also faster not to follow an object pointer
+     * To avoid having to store a map of NodeId -> Cost + Paths + Explored
+     * where the value is an object, we compress the fields into a long
+     * The explored boolean takes the sign bit of the cost int.
+     *
+     * Probably also faster not to follow an object pointer and better cache
+     * behavior to have a small footprint
      */
+    private static final long exploredMask = 0x80000000L;
 
     private static final long costPaths(int cost, int paths) {
-        return (((long)cost) << 32) | (paths & 0xffffffffL);
+        return (((long)paths) << 32) | (cost & 0xffffffffL);
+    }
+
+    private static final long setExplored(long costPaths) {
+        return exploredMask | costPaths;
     }
 
     private static final int cost(long costPaths) {
-        return (int)(costPaths >> 32);
+        return (int) (costPaths & ~exploredMask);
     }
 
     private static final int paths(long costPaths) {
-        return (int) costPaths;
+        return (int)(costPaths >> 32);
     }
+
+    private static final boolean explored(long costPaths) {
+        return (exploredMask & costPaths) > 0;
+    }
+
+    private static final long addPaths(long a, long b) {
+        return (0xffffffff00000000L & a) + b;
+    }
+
+    /*
+     * This function is called for every relationship we follow to update the cost & path count to a node
+     * It happens within the koloboke HashLongLongMap merge function, this way it avoids an additional hash lookup
+     */
+    private static final LongBinaryOperator updateSeenFunc = new LongBinaryOperator() {
+            public long applyAsLong(long oldVal, long newVal) {
+                if (explored(oldVal)) {
+                    return oldVal;
+                }
+                final int oldCost = cost(oldVal);
+                final int newCost = cost(newVal);
+                if (newCost < oldCost) {
+                    return newVal;
+                } else if (newCost > oldCost) {
+                    return oldVal;
+                } else {
+                    return addPaths(oldVal, newVal);
+                }
+            }
+        };
 
     public static interface NodeCallback {
         public void explored(final Dijkstra traveral, final NodeItem node, final long nodeId, final int cost, int paths);
@@ -94,7 +121,6 @@ public final class Dijkstra {
         this.readOps = readOps;
         this.nodeCallback = callback;
         this.queue = new PriorityQueue<Step>();
-        this.explored = HashLongSets.newMutableSet(500);
         this.paths = HashLongLongMaps.newMutableMap(500);
         this.maxCost = maxCost;
         this.finished = false;
@@ -112,53 +138,49 @@ public final class Dijkstra {
             this.finished = true;
             return;
         }
+        final long exploredCostPaths = this.paths.get(current.nodeId);
         // Because we cant modify the priority of things on the queue, we just have to handle
         // encountering duplicates. removing and re-inserting would be super slow
-        if (this.explored.contains(current.nodeId)) {
+        if (explored(exploredCostPaths)) {
             return;
         }
 
-        final int paths = paths(this.paths.get(current.nodeId));
-        final int cost = current.cost;
+        final int paths = paths(exploredCostPaths);
+        final int cost = cost(exploredCostPaths);
 
         final Cursor<NodeItem> nodeCursor = this.readOps.nodeCursor(current.nodeId);
         nodeCursor.next();
         final NodeItem currentNode = nodeCursor.get();
         final Cursor<RelationshipItem> relationshipCursor = currentNode.relationships(Direction.BOTH);
+        int degree = 0;
 
-        while(relationshipCursor.next()) {
-            RelationshipItem relation = relationshipCursor.get();
-            final int stepCost = this.relationshipCosts.get(relation.type()) + cost;
-            if (stepCost > this.maxCost) {
-                continue;
-            }
-            final long otherId = relation.otherNode(current.nodeId);
-            if (this.explored.contains(otherId)) {
-                continue;
-            }
-
-            long costPaths = this.paths.get(otherId);
-            if (costPaths == 0L) { //equivalent to getting null. this is a new node
-                this.paths.put(otherId, costPaths(stepCost, paths));
-            } else {
-                final int otherCost = cost(costPaths);
-                if (stepCost > otherCost) {
-                    continue; //we already saw a cheaper way of getting to this node
-                } else if (stepCost < otherCost) {
-                    //this way is cheaper than an existing one
-                    this.paths.put(otherId, costPaths(stepCost, paths));
-                } else {
-                    //we found a matching-cost path, add paths from this route
-                    this.paths.put(otherId, costPaths(stepCost, paths + paths(costPaths)));
+        if (cost != this.maxCost) { // if we're at max cost, dont bother looking at edges
+            while(relationshipCursor.next()) {
+                degree++;
+                RelationshipItem relation = relationshipCursor.get();
+                final int stepCost = this.relationshipCosts.get(relation.type()) + cost;
+                if (stepCost > this.maxCost) {
                     continue;
                 }
-            }
-            this.queue.offer(new Step(otherId, stepCost));
-        }
+                final long otherId = relation.otherNode(current.nodeId);
+                final long newVal = costPaths(stepCost, paths);
 
+                final long result = this.paths.merge(otherId, newVal, updateSeenFunc);
+                if (result == newVal) {
+                    this.queue.offer(new Step(otherId, stepCost));
+                }
+            }
+        }
         this.nodeCallback.explored(this, currentNode, current.nodeId, cost, paths);
-        this.paths.remove(current.nodeId);
-        this.explored.add(current.nodeId);
+        // If we explored the relationships on this node and it's degree was 1,
+        // then it is safe to forget this node in our paths tracking, because we wont encounter it again
+        // from this or any other traversal that doesnt also intersect with a lower cost path. (its a dead end)
+        // should save a bit of memory
+        if (degree == 1) {
+            this.paths.remove(current.nodeId);
+        } else {
+            this.paths.put(current.nodeId, setExplored(exploredCostPaths));
+        }
     }
 
     public void run() {
