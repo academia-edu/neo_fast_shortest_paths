@@ -12,23 +12,19 @@ import org.neo4j.kernel.api.cursor.NodeItem;
 import org.neo4j.kernel.api.cursor.RelationshipItem;
 
 import net.openhft.koloboke.collect.map.IntIntMap;
-import net.openhft.koloboke.collect.map.IntIntMapFactory;
-import net.openhft.koloboke.collect.map.hash.HashIntIntMaps;
 import net.openhft.koloboke.collect.map.hash.HashLongLongMap;
 import net.openhft.koloboke.collect.map.hash.HashLongLongMaps;
 import net.openhft.koloboke.function.LongBinaryOperator;
 
-public final class Dijkstra {
+import com.maxdemarzi.shortest.Traversal;
 
-    private static final IntIntMapFactory costMapFactory = HashIntIntMaps.
-        getDefaultFactory().
-        withDefaultValue(3);
+public final class Dijkstra extends Traversal {
+
 
     private final int maxCost;
     private final ReadOperations readOps;
     private final NodeCallback nodeCallback;
     private final IntIntMap relationshipCosts;
-    private boolean finished;
 
     private final PriorityQueue<Step> queue;
     private final HashLongLongMap paths;
@@ -37,6 +33,8 @@ public final class Dijkstra {
      * To avoid having to store a map of NodeId -> Cost + Paths + Explored
      * where the value is an object, we compress the fields into a long
      * The explored boolean takes the sign bit of the cost int.
+     *             paths              explored         cost
+     *  11111111111111111111111111111111|0|1111111111111111111111111111111
      *
      * Probably also faster not to follow an object pointer and better cache
      * behavior to have a small footprint
@@ -88,10 +86,6 @@ public final class Dijkstra {
             }
         };
 
-    public static interface NodeCallback {
-        public void explored(final Dijkstra traveral, final NodeItem node, final long nodeId, final int cost, int paths);
-    }
-
     private static final class Step implements Comparable<Step> {
         public final long nodeId;
         public final int cost;
@@ -111,23 +105,21 @@ public final class Dijkstra {
         }
     }
 
-    public Dijkstra(ReadOperations readOps, Map<String, Integer> relationshipCosts, Collection<Long> startNodes, int maxCost, NodeCallback callback) {
-        // Convert Relationship Names to IDs
-        this.relationshipCosts = costMapFactory.newMutableMap(relationshipCosts.size());
-        for (Entry<String, Integer> entry : relationshipCosts.entrySet()) {
-            this.relationshipCosts.put(readOps.relationshipTypeGetForName(entry.getKey()), entry.getValue().intValue());
-        }
-
+    public Dijkstra(ReadOperations readOps, IntIntMap relationshipCosts, Map<Long, Integer> startNodes, int maxCost, NodeCallback callback) {
+        super();
         this.readOps = readOps;
+        this.relationshipCosts = relationshipCosts;
         this.nodeCallback = callback;
         this.queue = new PriorityQueue<Step>();
         this.paths = HashLongLongMaps.newMutableMap(500);
         this.maxCost = maxCost;
-        this.finished = false;
         //initialize the queue with our start nodes
-        for (Long nodeId : startNodes) {
-            Step step = new Step(nodeId.longValue(), 0);
-            this.paths.put(nodeId.longValue(), costPaths(0, 1));
+        for (Map.Entry<Long,Integer> entry : startNodes.entrySet()) {
+            long nodeId = entry.getKey().longValue();
+            int cost = entry.getValue().intValue();
+
+            Step step = new Step(nodeId, cost);
+            this.paths.put(nodeId, costPaths(cost, 1));
             this.queue.offer(step);
         }
     }
@@ -135,7 +127,7 @@ public final class Dijkstra {
     public void step() {
         final Step current = this.queue.poll();
         if (current == null) {
-            this.finished = true;
+            this.finish();
             return;
         }
         final long exploredCostPaths = this.paths.get(current.nodeId);
@@ -167,6 +159,7 @@ public final class Dijkstra {
 
                 final long result = this.paths.merge(otherId, newVal, updateSeenFunc);
                 if (result == newVal) {
+                    //If this became the new lowest cost path to the node, put it on the queue
                     this.queue.offer(new Step(otherId, stepCost));
                 }
             }
@@ -183,18 +176,16 @@ public final class Dijkstra {
         }
     }
 
-    public void run() {
-        while (!this.isFinished()) {
-            this.step();
-        }
+    protected boolean hasExplored(long nodeId) {
+        return explored(this.paths.get(nodeId));
     }
 
-    public boolean isFinished() {
-        return this.finished;
+    protected int getCost(long nodeId) {
+        return cost(this.paths.get(nodeId));
     }
 
-    public void finish() {
-        this.finished = true;
+    protected int getPaths(long nodeId) {
+        return paths(this.paths.get(nodeId));
     }
 }
 

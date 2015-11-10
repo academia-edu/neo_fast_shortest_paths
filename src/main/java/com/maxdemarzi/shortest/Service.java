@@ -4,10 +4,13 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableMap.Builder;
 
 import net.openhft.koloboke.collect.LongCursor;
 import net.openhft.koloboke.collect.map.LongObjCursor;
+import net.openhft.koloboke.collect.map.IntIntMap;
 import net.openhft.koloboke.collect.map.LongIntCursor;
+import net.openhft.koloboke.collect.map.hash.HashIntIntMaps;
 import net.openhft.koloboke.collect.map.hash.HashLongIntMap;
 import net.openhft.koloboke.collect.map.hash.HashLongIntMaps;
 import net.openhft.koloboke.collect.map.hash.HashLongObjMap;
@@ -52,30 +55,12 @@ public class Service {
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static GraphDatabaseService db;
     private final GraphDatabaseAPI dbAPI;
-
     private final NodeCache nodeCache;
 
     public Service(@Context GraphDatabaseService graphDatabaseService) {
         db = graphDatabaseService;
         dbAPI = (GraphDatabaseAPI) db;
         nodeCache = new NodeCache(db, 1_000_000);
-    }
-
-    private static final LoadingCache<String, Long> bibliographyEntries = CacheBuilder.newBuilder()
-        .maximumSize(1_000_000)
-        .build(new CacheLoader<String, Long>() {
-                    public Long load(String bibId) throws Exception {
-                        return getBibliographyEntryNodeId(bibId);
-                    }
-                });
-
-    private static Long getBibliographyEntryNodeId(String bibId) throws Exception{
-        final Node node = db.findNode(Labels.BibliographyEntry, "id", Long.valueOf(bibId));
-        if (node != null) {
-            return node.getId();
-        } else {
-            throw new Exception("BibliographyEntry not found");
-        }
     }
 
     @GET
@@ -405,16 +390,31 @@ public class Service {
         }
     }
 
-    private static final Map<String, Integer> relationshipCosts = ImmutableMap.<String, Integer>builder()
-        .put("EqualTo", 1)
-        .put("AuthoredBy", 1)
-        .put("CoAuthorOf", 1)
-        .put("ContainsEmail", 1)
-        .put("Follows", 1)
-        .put("hasContact", 1)
-        .put("HasEmail", 1)
-        .put("HasUrl", 1)
-        .build();
+    private static volatile IntIntMap relationships;
+
+    private static final IntIntMap relationshipCosts(ReadOperations readOps) {
+        if (relationships == null) {
+            Map<String,Integer> costs = ImmutableMap.<String, Integer>builder()
+                .put("EqualTo", 1)
+                .put("AuthoredBy", 1)
+                .put("CoAuthorOf", 1)
+                .put("ContainsEmail", 1)
+                .put("Follows", 1)
+                .put("hasContact", 1)
+                .put("HasEmail", 1)
+                .put("HasUrl", 1)
+                .build();
+            //HashIntIntMaps.newim
+            Builder<Integer, Integer> builder = ImmutableMap.<Integer, Integer>builder();
+            for (Map.Entry<String, Integer> e : costs.entrySet()) {
+                builder.put(readOps.relationshipTypeGetForName(e.getKey()), e.getValue().intValue());
+            }
+            relationships = HashIntIntMaps.getDefaultFactory()
+                .withDefaultValue(100) // makes it too expensive to explore relationships not listed here
+                .newImmutableMap(builder.build());
+        }
+        return relationships;
+    }
 
     private void streamShortestPathsUsingDijkstra(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxLength, JsonGenerator jg) {
         final Long centerNodeId;
@@ -423,8 +423,11 @@ public class Service {
         } catch (ExecutionException e) {
             return;
         }
-        Collection<Long> startNodes = nodeCache.getBibliographEntryNodes(bibEntries);
-        startNodes.add(centerNodeId);
+        Map<Long, Integer> startNodes = HashLongIntMaps.newMutableMap();
+        for (Long nodeId : nodeCache.getBibliographEntryNodes(bibEntries))  {
+            startNodes.put(nodeId, 1);
+        }
+        startNodes.put(centerNodeId, 0);
 
         final HashLongObjMap<String> edgeEmailsByNodeId = HashLongObjMaps.newMutableMap();
         for (String edgeEmail : edgeEmails) {
@@ -439,8 +442,8 @@ public class Service {
             ThreadToStatementContextBridge ctx = dbAPI.getDependencyResolver().resolveDependency(ThreadToStatementContextBridge.class);
             ReadOperations ops = ctx.get().readOperations();
 
-            new Dijkstra(ops, relationshipCosts, startNodes, 4, new Dijkstra.NodeCallback() {
-                public void explored(Dijkstra traversal, NodeItem node, long nodeId, int cost, int paths) {
+            Dijkstra dijkstra = new Dijkstra(ops, relationshipCosts(ops), startNodes, 3, new Traversal.NodeCallback() {
+                public void explored(Traversal traversal, NodeItem node, long nodeId, int cost, int paths) {
                     String email = edgeEmailsByNodeId.remove(nodeId);
                     if (email != null) { //found a match!
                         try {
@@ -454,7 +457,25 @@ public class Service {
                         }
                     }
                 }
-            }).run();
+            });
+            dijkstra.run();
+            for (Long nodeId : edgeEmailsByNodeId.keySet()) {
+                new OneDegreeTraversal(ops, relationshipCosts(ops), nodeId.longValue(), 0, new Traversal.NodeCallback() {
+                    public void explored(Traversal traversal, NodeItem node, long connectingNode, int cost, int paths) {
+                        if (dijkstra.hasExplored(connectingNode)) {
+                            //Found a match!
+                            cost = dijkstra.getCost(connectingNode) + cost;
+                            paths = dijkstra.getPaths(connectingNode) * paths;
+                            String email = edgeEmailsByNodeId.get(nodeId);
+                            try {
+                                writeResultObject(jg, email, cost, paths);
+                            } catch(IOException ex) {
+                                return;
+                            }
+                        }
+                    }
+                }).run();
+            }
         }
     }
 
