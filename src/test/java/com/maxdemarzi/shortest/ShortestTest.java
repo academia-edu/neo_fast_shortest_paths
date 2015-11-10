@@ -214,6 +214,79 @@ public class ShortestTest {
         assertEquals(BIB_THREE_MAP, actual);
     }
 
+    // Dijkstra Tests
+
+    @Test
+    public void dijkstraShouldFindShortestPathOne() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
+                QUERY_ONE_MAP);
+
+        ArrayList actual = parseNewlineSeparated(response);
+        ArrayList<HashMap> expected = new ArrayList<HashMap>() {{ add(ONE_MAP); }};
+        assertArrayEquals(expected.toArray(), actual.toArray());
+    }
+
+    @Test
+    public void dijkstraShouldFindShortestPathTwo() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
+                QUERY_TWO_MAP);
+
+        ArrayList actual = parseNewlineSeparated(response);
+        ArrayList<HashMap> expected = new ArrayList<HashMap>() {{
+            add(ONE_MAP);
+            add(TWO_MAP);
+        }};
+        assertArrayEquals(expected.toArray(), actual.toArray());
+
+    }
+
+    @Test
+    public void dijkstraShouldFindShortestPathThree() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
+                QUERY_THREE_MAP);
+
+        ArrayList actual = parseNewlineSeparated(response);
+        ArrayList<HashMap> expected = new ArrayList<HashMap>() {{
+            add(THREE_MAP);
+        }};
+        assertArrayEquals(expected.toArray(), actual.toArray());
+    }
+
+    @Test
+    public void dijkstraShouldFindShortestPathViaBibTwo() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
+                QUERY_BIB_TWO_MAP);
+
+        String raw = response.rawContent();
+        Map<String,Object> actual = mapper.readValue(raw, Map.class);
+        assertEquals(BIB_TWO_MAP, actual);
+    }
+
+    @Test
+    public void dijkstraShouldFindShortestPathFive() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
+                QUERY_FIVE_MAP);
+
+        ArrayList actual = parseNewlineSeparated(response);
+        ArrayList<HashMap> expected = new ArrayList<HashMap>() {{
+            add(FIVE_MAP);
+        }};
+        assertArrayEquals(expected.toArray(), actual.toArray());
+    }
+
+    @Test
+    public void dijkstraShouldDealWithMissingEmails() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
+                QUERY_FOUR_MAP);
+
+        ArrayList actual = parseNewlineSeparated(response);
+        ArrayList<HashMap> expected = new ArrayList<HashMap>() {{
+            add(FOUR_MAP);
+        }};
+        assertArrayEquals(expected.toArray(), actual.toArray());
+    }
+
+
     private ArrayList parseNewlineSeparated(HTTP.Response response) throws Exception {
         String raw = response.rawContent();
         String[] lines = raw.split("\n");
@@ -224,7 +297,6 @@ public class ShortestTest {
                 actual.add(mapper.readValue(line, Map.class));
             }
         }
-
         return actual;
     }
 
@@ -243,19 +315,19 @@ public class ShortestTest {
                     .append("CREATE (oneBibMail:Email {email:'onebibmail@maxdemarzi.com'})")
                     .append("CREATE (twoBibMail:Email {email:'twobibmail@maxdemarzi.com'})")
                     .append("CREATE (threeBibMail:Email {email:'threebibmail@maxdemarzi.com'})")
-                    .append("CREATE (start)-[:CONNECTS]->(one)")
-                    .append("CREATE (one)-[:CONNECTS]->(two)")
-                    .append("CREATE (one)-[:CONNECTS]->(three)")
-                    .append("CREATE (one)-[:CONNECTS]->(four)")
-                    .append("CREATE (three)<-[:CONNECTS]-(five)")
-                    .append("CREATE (four)<-[:CONNECTS]-(five)")
-                    .append("CREATE (two)-[:CONNECTS]->(six)")
-                    .append("CREATE (six)-[:CONNECTS]->(seven)")
-                    .append("CREATE (seven)-[:CONNECTS]->(eight)")
+                    .append("CREATE (start)-[:Follows]->(one)")
+                    .append("CREATE (one)-[:hasContact]->(two)")
+                    .append("CREATE (one)-[:HasEmail]->(three)")
+                    .append("CREATE (one)-[:HasUrl]->(four)")
+                    .append("CREATE (three)<-[:ContainsEmail]-(five)")
+                    .append("CREATE (four)<-[:CoAuthorOf]-(five)")
+                    .append("CREATE (two)-[:EqualTo]->(six)")
+                    .append("CREATE (six)-[:hasContact]->(seven)")
+                    .append("CREATE (seven)-[:hasContact]->(eight)")
                     .append("CREATE (oneBib:BibliographyEntry {id: 1})")
-                    .append("CREATE (oneBib)-[:CONNECTS]->(oneBibMail)")
-                    .append("CREATE (twoBibMail)-[:CONNECTS]->(oneBibMail)")
-                    .append("CREATE (threeBibMail)-[:CONNECTS]->(twoBibMail)")
+                    .append("CREATE (oneBib)-[:hasContact]->(oneBibMail)")
+                    .append("CREATE (twoBibMail)-[:hasContact]->(oneBibMail)")
+                    .append("CREATE (threeBibMail)-[:AuthoredBy]->(twoBibMail)")
                     .toString();
 
     public static HashMap<String, Object> QUERY_ONE_MAP = new HashMap<String, Object>(){{

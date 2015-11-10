@@ -230,6 +230,31 @@ public class Service {
         return Response.ok().entity(stream).type(MediaType.APPLICATION_JSON).build();
     }
 
+    @POST
+    @Path("/query_shortest")
+    public Response query_shortest(String body, @Context GraphDatabaseService db) throws IOException, ExecutionException {
+
+        StreamingOutput stream = new StreamingOutput() {
+            @Override
+            public void write(OutputStream os) throws IOException, WebApplicationException {
+                JsonGenerator jg = objectMapper.getJsonFactory().createJsonGenerator(os, JsonEncoding.UTF8);
+
+                // Validate our input or exit right away
+                HashMap input = getValidQueryInput(body);
+
+                String centerEmail = (String) input.get("center_email");
+                List<String> bibEntries = (ArrayList<String>) input.get("bibliography_entries");
+                List<String> edgeEmails = (ArrayList<String>) input.get("edge_emails");
+                int length = (int) input.get("length");
+
+                streamShortestPathsUsingDijkstra(centerEmail, bibEntries, edgeEmails, length, jg);
+
+                jg.close();
+            }
+        };
+        return Response.ok().entity(stream).type(MediaType.APPLICATION_JSON).build();
+    }
+
     private static final List<Node> nodesById(Iterable<Long> ids) {
         List<Node> nodes = new ArrayList<>();
         for (Long id : ids) {
@@ -404,7 +429,6 @@ public class Service {
                 .put("HasEmail", 1)
                 .put("HasUrl", 1)
                 .build();
-            //HashIntIntMaps.newim
             Builder<Integer, Integer> builder = ImmutableMap.<Integer, Integer>builder();
             for (Map.Entry<String, Integer> e : costs.entrySet()) {
                 builder.put(readOps.relationshipTypeGetForName(e.getKey()), e.getValue().intValue());
@@ -417,28 +441,28 @@ public class Service {
     }
 
     private void streamShortestPathsUsingDijkstra(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxLength, JsonGenerator jg) {
-        final Long centerNodeId;
-        try {
-            centerNodeId = nodeCache.getEmailNode(centerEmail);
-        } catch (ExecutionException e) {
-            return;
-        }
-        Map<Long, Integer> startNodes = HashLongIntMaps.newMutableMap();
-        for (Long nodeId : nodeCache.getBibliographEntryNodes(bibEntries))  {
-            startNodes.put(nodeId, 1);
-        }
-        startNodes.put(centerNodeId, 0);
-
-        final HashLongObjMap<String> edgeEmailsByNodeId = HashLongObjMaps.newMutableMap();
-        for (String edgeEmail : edgeEmails) {
-            try {
-                edgeEmailsByNodeId.put(nodeCache.getEmailNode(edgeEmail), edgeEmail);
-            } catch (Exception e) {
-                continue;
-            }
-        }
-
         try (Transaction tx = db.beginTx()) {
+            final Long centerNodeId;
+            try {
+                centerNodeId = nodeCache.getEmailNode(centerEmail);
+            } catch (ExecutionException e) {
+                return;
+            }
+            Map<Long, Integer> startNodes = HashLongIntMaps.newMutableMap();
+            for (Long nodeId : nodeCache.getBibliographEntryNodes(bibEntries))  {
+                startNodes.put(nodeId, 1);
+            }
+            startNodes.put(centerNodeId, 0);
+
+            final HashLongObjMap<String> edgeEmailsByNodeId = HashLongObjMaps.newMutableMap();
+            for (String edgeEmail : edgeEmails) {
+                try {
+                    edgeEmailsByNodeId.put(nodeCache.getEmailNode(edgeEmail), edgeEmail);
+                } catch (Exception e) {
+                    continue;
+                }
+            }
+
             ThreadToStatementContextBridge ctx = dbAPI.getDependencyResolver().resolveDependency(ThreadToStatementContextBridge.class);
             ReadOperations ops = ctx.get().readOperations();
 
@@ -476,6 +500,8 @@ public class Service {
                     }
                 }).run();
             }
+        } catch (Exception e) {
+            e.printStackTrace(System.out);
         }
     }
 
