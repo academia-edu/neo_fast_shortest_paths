@@ -86,7 +86,7 @@ public final class Dijkstra extends Traversal {
             }
         };
 
-    private static final class Step implements Comparable<Step> {
+    private static class Step implements Comparable<Step> {
         public final long nodeId;
         public final int cost;
 
@@ -95,13 +95,17 @@ public final class Dijkstra extends Traversal {
             this.cost = cost;
         }
 
-        public int compareTo(Step o) {
+        public final int compareTo(Step o) {
             if (this.cost < o.cost) {
                 return -1;
             } else if (this.cost > o.cost) {
                 return 1;
             }
             return 0;
+        }
+
+        public boolean isStartNode() {
+            return false;
         }
     }
 
@@ -118,7 +122,11 @@ public final class Dijkstra extends Traversal {
             long nodeId = entry.getKey().longValue();
             int cost = entry.getValue().intValue();
 
-            Step step = new Step(nodeId, cost);
+            Step step = new Step(nodeId, cost) {
+                public boolean isStartNode() {
+                    return true;
+                }
+            };
             this.paths.put(nodeId, costPaths(cost, 1));
             this.queue.offer(step);
         }
@@ -169,7 +177,8 @@ public final class Dijkstra extends Traversal {
         // then it is safe to forget this node in our paths tracking, because we wont encounter it again
         // from this or any other traversal that doesnt also intersect with a lower cost path. (its a dead end)
         // should save a bit of memory
-        if (degree == 1) {
+        //
+        if (degree == 1 && !current.isStartNode()) {
             this.paths.remove(current.nodeId);
         } else {
             this.paths.put(current.nodeId, setExplored(exploredCostPaths));
