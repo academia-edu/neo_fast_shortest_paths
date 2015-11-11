@@ -421,13 +421,13 @@ public class Service {
         if (relationships == null) {
             Map<String,Integer> costs = ImmutableMap.<String, Integer>builder()
                 .put("EqualTo", 1)
-                .put("AuthoredBy", 1)
-                .put("CoAuthorOf", 1)
-                .put("ContainsEmail", 1)
-                .put("Follows", 1)
-                .put("hasContact", 1)
                 .put("HasEmail", 1)
-                .put("HasUrl", 1)
+                .put("AuthoredBy", 2)
+                .put("ContainsEmail", 2)
+                .put("CoAuthorOf", 4)
+                .put("Follows", 4)
+                .put("hasContact", 4)
+                .put("HasUrl", 4)
                 .build();
             Builder<Integer, Integer> builder = ImmutableMap.<Integer, Integer>builder();
             for (Map.Entry<String, Integer> e : costs.entrySet()) {
@@ -466,7 +466,7 @@ public class Service {
             ThreadToStatementContextBridge ctx = dbAPI.getDependencyResolver().resolveDependency(ThreadToStatementContextBridge.class);
             ReadOperations ops = ctx.get().readOperations();
 
-            Dijkstra dijkstra = new Dijkstra(ops, relationshipCosts(ops), startNodes, 3, new Traversal.NodeCallback() {
+            Dijkstra dijkstra = new Dijkstra(ops, relationshipCosts(ops), startNodes, maxLength, new Traversal.NodeCallback() {
                 public void explored(Traversal traversal, NodeItem node, long nodeId, int cost, int paths) {
                     String email = edgeEmailsByNodeId.remove(nodeId);
                     if (email != null) { //found a match!

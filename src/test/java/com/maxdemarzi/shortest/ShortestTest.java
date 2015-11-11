@@ -219,22 +219,22 @@ public class ShortestTest {
     @Test
     public void dijkstraShouldFindShortestPathOne() throws Exception {
         HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
-                QUERY_ONE_MAP);
+                DIJKSTRA_QUERY_ONE_MAP);
 
         ArrayList actual = parseNewlineSeparated(response);
-        ArrayList<HashMap> expected = new ArrayList<HashMap>() {{ add(ONE_MAP); }};
+        ArrayList<HashMap> expected = new ArrayList<HashMap>() {{ add(DIJKSTRA_ONE_MAP); }};
         assertArrayEquals(expected.toArray(), actual.toArray());
     }
 
     @Test
     public void dijkstraShouldFindShortestPathTwo() throws Exception {
         HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
-                QUERY_TWO_MAP);
+                DIJKSTRA_QUERY_TWO_MAP);
 
         ArrayList actual = parseNewlineSeparated(response);
         ArrayList<HashMap> expected = new ArrayList<HashMap>() {{
-            add(ONE_MAP);
-            add(TWO_MAP);
+            add(DIJKSTRA_ONE_MAP);
+            add(DIJKSTRA_TWO_MAP);
         }};
         assertArrayEquals(expected.toArray(), actual.toArray());
 
@@ -243,33 +243,11 @@ public class ShortestTest {
     @Test
     public void dijkstraShouldFindShortestPathThree() throws Exception {
         HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
-                QUERY_THREE_MAP);
+                DIJKSTRA_QUERY_THREE_MAP);
 
         ArrayList actual = parseNewlineSeparated(response);
         ArrayList<HashMap> expected = new ArrayList<HashMap>() {{
-            add(THREE_MAP);
-        }};
-        assertArrayEquals(expected.toArray(), actual.toArray());
-    }
-
-    @Test
-    public void dijkstraShouldFindShortestPathViaBibTwo() throws Exception {
-        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
-                QUERY_BIB_TWO_MAP);
-
-        String raw = response.rawContent();
-        Map<String,Object> actual = mapper.readValue(raw, Map.class);
-        assertEquals(BIB_TWO_MAP, actual);
-    }
-
-    @Test
-    public void dijkstraShouldFindShortestPathFive() throws Exception {
-        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
-                QUERY_FIVE_MAP);
-
-        ArrayList actual = parseNewlineSeparated(response);
-        ArrayList<HashMap> expected = new ArrayList<HashMap>() {{
-            add(FIVE_MAP);
+            add(DIJKSTRA_THREE_MAP);
         }};
         assertArrayEquals(expected.toArray(), actual.toArray());
     }
@@ -277,15 +255,24 @@ public class ShortestTest {
     @Test
     public void dijkstraShouldDealWithMissingEmails() throws Exception {
         HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
-                QUERY_FOUR_MAP);
+                DIJKSTRA_QUERY_FOUR_MAP);
 
         ArrayList actual = parseNewlineSeparated(response);
         ArrayList<HashMap> expected = new ArrayList<HashMap>() {{
-            add(FOUR_MAP);
+            add(DIJKSTRA_FOUR_MAP);
         }};
         assertArrayEquals(expected.toArray(), actual.toArray());
     }
 
+    @Test
+    public void dijkstraShouldFindShortestPathViaBibTwo() throws Exception {
+        HTTP.Response response = HTTP.POST(neo4j.httpURI().resolve("/v1/service/query_shortest").toString(),
+                DIJKSTRA_QUERY_BIB_MAP);
+
+        String raw = response.rawContent();
+        Map<String,Object> actual = mapper.readValue(raw, Map.class);
+        assertEquals(DIJKSTRA_BIB_MAP, actual);
+    }
 
     private ArrayList parseNewlineSeparated(HTTP.Response response) throws Exception {
         String raw = response.rawContent();
@@ -465,6 +452,83 @@ public class ShortestTest {
     static HashMap<String, Object> BIB_THREE_MAP = new HashMap<String, Object>(){{
         put("email", "threebibmail@maxdemarzi.com");
         put("length", 4);
+        put("count", 1);
+    }};
+
+    // Dijkstra stuff
+
+    static HashMap<String, Object> DIJKSTRA_QUERY_ONE_MAP = new HashMap<String, Object>(){{
+        put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
+        put("edge_emails", new ArrayList<String>() {{  add("one@maxdemarzi.com");} });
+        put("length", 16);
+    }};
+
+    static HashMap<String, Object> DIJKSTRA_ONE_MAP = new HashMap<String, Object>(){{
+        put("email", "one@maxdemarzi.com");
+        put("length", 4);
+        put("count", 1);
+    }};
+
+    static HashMap<String, Object> DIJKSTRA_QUERY_TWO_MAP = new HashMap<String, Object>(){{
+        put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
+        put("edge_emails", new ArrayList<String>() {{
+            add("one@maxdemarzi.com");
+            add("two@maxdemarzi.com");
+        }});
+        put("length", 16);
+    }};
+
+    static HashMap<String, Object> DIJKSTRA_TWO_MAP = new HashMap<String, Object>(){{
+        put("email", "two@maxdemarzi.com");
+        put("length", 8);
+        put("count", 1);
+    }};
+
+    static HashMap<String, Object> DIJKSTRA_QUERY_THREE_MAP = new HashMap<String, Object>(){{
+        put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
+        put("edge_emails", new ArrayList<String>() {{
+            add("five@maxdemarzi.com");
+        }});
+        put("length", 16);
+    }};
+
+    static HashMap<String, Object> DIJKSTRA_THREE_MAP = new HashMap<String, Object>(){{
+        put("email", "five@maxdemarzi.com");
+        put("length", 7);
+        put("count", 1);
+    }};
+
+    static HashMap<String, Object> DIJKSTRA_QUERY_FOUR_MAP = new HashMap<String, Object>(){{
+        put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>());
+        put("edge_emails", new ArrayList<String>() {{
+            add("five@maxdemarzi.com");
+            add("sixty@maxdemarzi.com");
+        }});
+        put("length", 16);
+    }};
+
+    static HashMap<String, Object> DIJKSTRA_FOUR_MAP = new HashMap<String, Object>(){{
+        put("email", "five@maxdemarzi.com");
+        put("length", 7);
+        put("count", 1);
+    }};
+
+    static HashMap<String, Object> DIJKSTRA_QUERY_BIB_MAP = new HashMap<String, Object>(){{
+        put("center_email", "start@maxdemarzi.com");
+        put("bibliography_entries", new ArrayList<String>() {{ add("1");} });
+        put("edge_emails", new ArrayList<String>() {{
+            add("twobibmail@maxdemarzi.com");
+        }});
+        put("length", 16);
+    }};
+
+    static HashMap<String, Object> DIJKSTRA_BIB_MAP = new HashMap<String, Object>(){{
+        put("email", "twobibmail@maxdemarzi.com");
+        put("length", 9);
         put("count", 1);
     }};
 }
