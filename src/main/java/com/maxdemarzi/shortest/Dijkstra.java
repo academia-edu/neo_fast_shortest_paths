@@ -154,7 +154,7 @@ public final class Dijkstra extends Traversal {
         final Cursor<RelationshipItem> relationshipCursor = currentNode.relationships(Direction.BOTH);
         int degree = 0;
 
-        if (cost != this.maxCost) { // if we're at max cost, dont bother looking at edges
+        if (cost < this.maxCost) { // if we're at max cost, dont bother looking at edges
             while(relationshipCursor.next()) {
                 degree++;
                 RelationshipItem relation = relationshipCursor.get();
