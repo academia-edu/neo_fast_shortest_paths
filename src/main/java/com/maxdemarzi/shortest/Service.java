@@ -423,7 +423,7 @@ public class Service {
                 .put("EqualTo", 1)
                 .put("HasEmail", 1)
                 .put("AuthoredBy", 2)
-                .put("ContainsEmail", 2)
+                .put("ContainsEmail", 3)
                 .put("CoAuthorOf", 4)
                 .put("Follows", 4)
                 .put("hasContact", 4)

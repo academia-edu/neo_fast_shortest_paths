@@ -497,7 +497,7 @@ public class ShortestTest {
 
     static HashMap<String, Object> DIJKSTRA_THREE_MAP = new HashMap<String, Object>(){{
         put("email", "five@maxdemarzi.com");
-        put("length", 7);
+        put("length", 8);
         put("count", 1);
     }};
 
@@ -513,7 +513,7 @@ public class ShortestTest {
 
     static HashMap<String, Object> DIJKSTRA_FOUR_MAP = new HashMap<String, Object>(){{
         put("email", "five@maxdemarzi.com");
-        put("length", 7);
+        put("length", 8);
         put("count", 1);
     }};
 
