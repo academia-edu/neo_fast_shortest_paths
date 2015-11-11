@@ -18,6 +18,7 @@ import net.openhft.koloboke.collect.map.hash.HashLongObjMaps;
 import net.openhft.koloboke.collect.set.LongSet;
 import net.openhft.koloboke.collect.set.hash.HashLongSets;
 
+import org.apache.commons.lang3.mutable.MutableInt;
 import org.codehaus.jackson.JsonEncoding;
 import org.codehaus.jackson.JsonGenerator;
 import org.codehaus.jackson.map.ObjectMapper;
@@ -484,36 +485,37 @@ public class Service {
             });
             dijkstra.run();
             for (Long nodeId : edgeEmailsByNodeId.keySet()) {
-                int minCost = 0;
-                int totalPaths = 0;
+                // java doesn't let you use mutable variables in a closure
+                final MutableInt minCost = new MutableInt(0);
+                final MutableInt totalPaths = new MutableInt(0);
 
                 new OneDegreeTraversal(ops, relationshipCosts(ops), nodeId.longValue(), 0, new Traversal.NodeCallback() {
                     public void explored(Traversal traversal, NodeItem node, long connectingNode, int cost, int paths) {
                         if (dijkstra.hasExplored(connectingNode)) {
                             cost = dijkstra.getCost(connectingNode) + cost;
                             paths = dijkstra.getPaths(connectingNode) * paths;
-                            if (minCost == 0 || cost < minCost) {
-                                minCost = cost;
-                                totalPaths = paths;
-                            } else if (cost == minCost) {
-                                totalPaths += paths;
+                            if (minCost.intValue() == 0 || cost < minCost.intValue()) {
+                                minCost.setValue(cost);
+                                totalPaths.setValue(paths);
+                            } else if (cost == minCost.intValue()) {
+                                totalPaths.add(paths);
                             }
                         }
                     }
                 }).run();
-                if (minCost == 0) { //we didnt find any connections
+                if (minCost.intValue() == 0) { //we didnt find any connections
                     continue;
                 }
 
                 String email = edgeEmailsByNodeId.get(nodeId);
                 try {
-                    writeResultObject(jg, email, minCost, totalPaths);
+                    writeResultObject(jg, email, minCost.intValue(), totalPaths.intValue());
                 } catch(IOException ex) {
                     return;
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace(System.out);
+            return;
         }
     }
 
