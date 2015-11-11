@@ -49,6 +49,7 @@ import java.util.concurrent.ExecutionException;
 import java.lang.Iterable;
 
 import static com.maxdemarzi.shortest.Validators.getValidQueryInput;
+import static com.maxdemarzi.shortest.Validators.getValidDijkstraInput;
 
 @Path("/service")
 public class Service {
@@ -239,16 +240,14 @@ public class Service {
             @Override
             public void write(OutputStream os) throws IOException, WebApplicationException {
                 JsonGenerator jg = objectMapper.getJsonFactory().createJsonGenerator(os, JsonEncoding.UTF8);
-
-                // Validate our input or exit right away
-                HashMap input = getValidQueryInput(body);
+                HashMap input = getValidDijkstraInput(body);
 
                 String centerEmail = (String) input.get("center_email");
-                List<String> bibEntries = (ArrayList<String>) input.get("bibliography_entries");
-                List<String> edgeEmails = (ArrayList<String>) input.get("edge_emails");
-                int length = (int) input.get("length");
+                List<String> bibEntries = (List<String>) input.get("bibliography_entries");
+                List<String> edgeEmails = (List<String>) input.get("edge_emails");
+                int maxCost = (int) input.get("max_cost");
 
-                streamShortestPathsUsingDijkstra(centerEmail, bibEntries, edgeEmails, length, jg);
+                streamShortestPathsUsingDijkstra(centerEmail, bibEntries, edgeEmails, maxCost, jg);
 
                 jg.close();
             }
@@ -441,7 +440,7 @@ public class Service {
         return relationships;
     }
 
-    private void streamShortestPathsUsingDijkstra(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxLength, JsonGenerator jg) {
+    private void streamShortestPathsUsingDijkstra(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxCost, JsonGenerator jg) {
         try (Transaction tx = db.beginTx()) {
             final Long centerNodeId;
             try {
@@ -467,7 +466,7 @@ public class Service {
             ThreadToStatementContextBridge ctx = dbAPI.getDependencyResolver().resolveDependency(ThreadToStatementContextBridge.class);
             ReadOperations ops = ctx.get().readOperations();
 
-            Dijkstra dijkstra = new Dijkstra(ops, relationshipCosts(ops), startNodes, maxLength, new Traversal.NodeCallback() {
+            Dijkstra dijkstra = new Dijkstra(ops, relationshipCosts(ops), startNodes, maxCost, new Traversal.NodeCallback() {
                 public void explored(Traversal traversal, NodeItem node, long nodeId, int cost, int paths) {
                     String email = edgeEmailsByNodeId.remove(nodeId);
                     if (email != null) { //found a match!

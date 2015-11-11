@@ -461,7 +461,7 @@ public class ShortestTest {
         put("center_email", "start@maxdemarzi.com");
         put("bibliography_entries", new ArrayList<String>());
         put("edge_emails", new ArrayList<String>() {{  add("one@maxdemarzi.com");} });
-        put("length", 16);
+        put("max_cost", 16);
     }};
 
     static HashMap<String, Object> DIJKSTRA_ONE_MAP = new HashMap<String, Object>(){{
@@ -477,7 +477,7 @@ public class ShortestTest {
             add("one@maxdemarzi.com");
             add("two@maxdemarzi.com");
         }});
-        put("length", 16);
+        put("max_cost", 16);
     }};
 
     static HashMap<String, Object> DIJKSTRA_TWO_MAP = new HashMap<String, Object>(){{
@@ -492,7 +492,7 @@ public class ShortestTest {
         put("edge_emails", new ArrayList<String>() {{
             add("five@maxdemarzi.com");
         }});
-        put("length", 16);
+        put("max_cost", 16);
     }};
 
     static HashMap<String, Object> DIJKSTRA_THREE_MAP = new HashMap<String, Object>(){{
@@ -508,7 +508,7 @@ public class ShortestTest {
             add("five@maxdemarzi.com");
             add("sixty@maxdemarzi.com");
         }});
-        put("length", 16);
+        put("max_cost", 16);
     }};
 
     static HashMap<String, Object> DIJKSTRA_FOUR_MAP = new HashMap<String, Object>(){{
@@ -523,7 +523,7 @@ public class ShortestTest {
         put("edge_emails", new ArrayList<String>() {{
             add("twobibmail@maxdemarzi.com");
         }});
-        put("length", 16);
+        put("max_cost", 16);
     }};
 
     static HashMap<String, Object> DIJKSTRA_BIB_MAP = new HashMap<String, Object>(){{
