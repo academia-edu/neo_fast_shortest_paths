@@ -484,21 +484,33 @@ public class Service {
             });
             dijkstra.run();
             for (Long nodeId : edgeEmailsByNodeId.keySet()) {
+                int minCost = 0;
+                int totalPaths = 0;
+
                 new OneDegreeTraversal(ops, relationshipCosts(ops), nodeId.longValue(), 0, new Traversal.NodeCallback() {
                     public void explored(Traversal traversal, NodeItem node, long connectingNode, int cost, int paths) {
                         if (dijkstra.hasExplored(connectingNode)) {
-                            //Found a match!
                             cost = dijkstra.getCost(connectingNode) + cost;
                             paths = dijkstra.getPaths(connectingNode) * paths;
-                            String email = edgeEmailsByNodeId.get(nodeId);
-                            try {
-                                writeResultObject(jg, email, cost, paths);
-                            } catch(IOException ex) {
-                                return;
+                            if (minCost == 0 || cost < minCost) {
+                                minCost = cost;
+                                totalPaths = paths;
+                            } else if (cost == minCost) {
+                                totalPaths += paths;
                             }
                         }
                     }
                 }).run();
+                if (minCost == 0) { //we didnt find any connections
+                    continue;
+                }
+
+                String email = edgeEmailsByNodeId.get(nodeId);
+                try {
+                    writeResultObject(jg, email, minCost, totalPaths);
+                } catch(IOException ex) {
+                    return;
+                }
             }
         } catch (Exception e) {
             e.printStackTrace(System.out);
