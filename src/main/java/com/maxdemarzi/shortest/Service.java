@@ -441,6 +441,8 @@ public class Service {
     }
 
     private void streamShortestPathsUsingDijkstra(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxCost, JsonGenerator jg) {
+        int centerMaxCost = Math.max(Math.min(4, maxCost), maxCost - 4);
+        int edgeMaxCost = Math.max(0, maxCost - centerMaxCost);
         try (Transaction tx = db.beginTx()) {
             final Long centerNodeId;
             try {
@@ -466,7 +468,7 @@ public class Service {
             ThreadToStatementContextBridge ctx = dbAPI.getDependencyResolver().resolveDependency(ThreadToStatementContextBridge.class);
             ReadOperations ops = ctx.get().readOperations();
 
-            Dijkstra dijkstra = new Dijkstra(ops, relationshipCosts(ops), startNodes, maxCost, new Traversal.NodeCallback() {
+            Dijkstra centerTraversal = new Dijkstra(ops, relationshipCosts(ops), startNodes, centerMaxCost, new Traversal.NodeCallback() {
                 public void explored(Traversal traversal, NodeItem node, long nodeId, int cost, int paths) {
                     String email = edgeEmailsByNodeId.remove(nodeId);
                     if (email != null) { //found a match!
@@ -482,22 +484,24 @@ public class Service {
                     }
                 }
             });
-            dijkstra.run();
+            centerTraversal.run();
             for (Long nodeId : edgeEmailsByNodeId.keySet()) {
                 // java doesn't let you use mutable variables in a closure
                 final MutableInt minCost = new MutableInt(0);
                 final MutableInt totalPaths = new MutableInt(0);
 
-                new OneDegreeTraversal(ops, relationshipCosts(ops), nodeId.longValue(), 0, new Traversal.NodeCallback() {
+                new Dijkstra(ops, relationshipCosts(ops), ImmutableMap.<Long, Integer>of(nodeId, 0), edgeMaxCost, new Traversal.NodeCallback() {
                     public void explored(Traversal traversal, NodeItem node, long connectingNode, int cost, int paths) {
-                        if (dijkstra.hasExplored(connectingNode)) {
-                            cost = dijkstra.getCost(connectingNode) + cost;
-                            paths = dijkstra.getPaths(connectingNode) * paths;
+                        if (centerTraversal.hasExplored(connectingNode)) {
+                            cost = centerTraversal.getCost(connectingNode) + cost;
+                            paths = centerTraversal.getPaths(connectingNode) * paths;
                             if (minCost.intValue() == 0 || cost < minCost.intValue()) {
                                 minCost.setValue(cost);
                                 totalPaths.setValue(paths);
                             } else if (cost == minCost.intValue()) {
                                 totalPaths.add(paths);
+                            } else {//keep adding up connecting paths until we hit a higher cost
+                                traversal.finish();
                             }
                         }
                     }
