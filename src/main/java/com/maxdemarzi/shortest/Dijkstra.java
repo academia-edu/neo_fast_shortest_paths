@@ -148,13 +148,14 @@ public final class Dijkstra extends Traversal {
         final int paths = paths(exploredCostPaths);
         final int cost = cost(exploredCostPaths);
 
-        final Cursor<NodeItem> nodeCursor = this.readOps.nodeCursor(current.nodeId);
-        nodeCursor.next();
-        final NodeItem currentNode = nodeCursor.get();
-        final Cursor<RelationshipItem> relationshipCursor = currentNode.relationships(Direction.BOTH);
+        NodeItem currentNode = null;
         int degree = 0;
 
-        if (cost < this.maxCost) { // if we're at max cost, dont bother looking at edges
+        if (cost < this.maxCost) { // if we're at max cost, dont bother looking at edges (or loading the node)
+            final Cursor<NodeItem> nodeCursor = this.readOps.nodeCursor(current.nodeId);
+            nodeCursor.next();
+            currentNode = nodeCursor.get();
+            final Cursor<RelationshipItem> relationshipCursor = currentNode.relationships(Direction.BOTH);
             while(relationshipCursor.next()) {
                 degree++;
                 RelationshipItem relation = relationshipCursor.get();
