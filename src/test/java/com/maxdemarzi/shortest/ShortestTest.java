@@ -3,7 +3,11 @@ package com.maxdemarzi.shortest;
 import org.junit.Rule;
 import org.junit.Test;
 import org.neo4j.harness.junit.Neo4jRule;
+import org.neo4j.kernel.api.ReadOperations;
 import org.neo4j.test.server.HTTP;
+
+import com.google.common.collect.ImmutableMap;
+
 import org.codehaus.jackson.map.ObjectMapper;
 
 import java.util.ArrayList;
@@ -16,6 +20,17 @@ import static org.junit.Assert.assertEquals;
 public class ShortestTest {
 
     final static ObjectMapper mapper = new ObjectMapper();
+
+    final static Map<String,Integer> edgeCosts = ImmutableMap.<String, Integer>builder()
+                .put("EqualTo", 1)
+                .put("HasEmail", 1)
+                .put("AuthoredBy", 2)
+                .put("ContainsEmail", 3)
+                .put("CoAuthorOf", 4)
+                .put("Follows", 4)
+                .put("hasContact", 4)
+                .put("HasUrl", 4)
+                .build();
 
     @Rule
     public Neo4jRule neo4j = new Neo4jRule()
@@ -462,6 +477,7 @@ public class ShortestTest {
         put("bibliography_entries", new ArrayList<String>());
         put("edge_emails", new ArrayList<String>() {{  add("one@maxdemarzi.com");} });
         put("max_cost", 16);
+        put("edge_costs", edgeCosts);
     }};
 
     static HashMap<String, Object> DIJKSTRA_ONE_MAP = new HashMap<String, Object>(){{
@@ -478,6 +494,7 @@ public class ShortestTest {
             add("two@maxdemarzi.com");
         }});
         put("max_cost", 16);
+        put("edge_costs", edgeCosts);
     }};
 
     static HashMap<String, Object> DIJKSTRA_TWO_MAP = new HashMap<String, Object>(){{
@@ -493,6 +510,7 @@ public class ShortestTest {
             add("five@maxdemarzi.com");
         }});
         put("max_cost", 16);
+        put("edge_costs", edgeCosts);
     }};
 
     static HashMap<String, Object> DIJKSTRA_THREE_MAP = new HashMap<String, Object>(){{
@@ -509,6 +527,7 @@ public class ShortestTest {
             add("sixty@maxdemarzi.com");
         }});
         put("max_cost", 16);
+        put("edge_costs", edgeCosts);
     }};
 
     static HashMap<String, Object> DIJKSTRA_FOUR_MAP = new HashMap<String, Object>(){{
@@ -524,6 +543,7 @@ public class ShortestTest {
             add("twobibmail@maxdemarzi.com");
         }});
         put("max_cost", 16);
+        put("edge_costs", edgeCosts);
     }};
 
     static HashMap<String, Object> DIJKSTRA_BIB_MAP = new HashMap<String, Object>(){{

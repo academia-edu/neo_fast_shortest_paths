@@ -246,9 +246,9 @@ public class Service {
                 List<String> bibEntries = (List<String>) input.get("bibliography_entries");
                 List<String> edgeEmails = (List<String>) input.get("edge_emails");
                 int maxCost = (int) input.get("max_cost");
+                Map<String,Integer> edgeCosts = (Map<String,Integer>) input.get("edge_costs");
 
-                streamShortestPathsUsingDijkstra(centerEmail, bibEntries, edgeEmails, maxCost, jg);
-
+                streamShortestPathsUsingDijkstra(centerEmail, bibEntries, edgeEmails, maxCost, edgeCosts, jg);
                 jg.close();
             }
         };
@@ -417,9 +417,20 @@ public class Service {
 
     private static volatile IntIntMap relationships;
 
+    private static final IntIntMap relationshipCosts(ReadOperations readOps, Map<String,Integer> costs) {
+        Builder<Integer, Integer> builder = ImmutableMap.<Integer, Integer>builder();
+        for (Map.Entry<String, Integer> e : costs.entrySet()) {
+            builder.put(readOps.relationshipTypeGetForName(e.getKey()), e.getValue().intValue());
+        }
+        return relationships = HashIntIntMaps.getDefaultFactory()
+            .withDefaultValue(100) // makes it too expensive to explore relationships not listed here
+            .newImmutableMap(builder.build());
+    }
+
+    //Default costs
     private static final IntIntMap relationshipCosts(ReadOperations readOps) {
         if (relationships == null) {
-           Map<String,Integer> costs = ImmutableMap.<String, Integer>builder()
+            relationships = relationshipCosts(readOps, ImmutableMap.<String, Integer>builder()
                 .put("EqualTo", 4)
                 .put("HasEmail", 4)
                 .put("AuthoredBy", 4)
@@ -428,19 +439,12 @@ public class Service {
                 .put("Follows", 4)
                 .put("hasContact", 4)
                 .put("HasUrl", 4)
-                .build();
-            Builder<Integer, Integer> builder = ImmutableMap.<Integer, Integer>builder();
-            for (Map.Entry<String, Integer> e : costs.entrySet()) {
-                builder.put(readOps.relationshipTypeGetForName(e.getKey()), e.getValue().intValue());
-            }
-            relationships = HashIntIntMaps.getDefaultFactory()
-                .withDefaultValue(100) // makes it too expensive to explore relationships not listed here
-                .newImmutableMap(builder.build());
+                .build());
         }
         return relationships;
     }
 
-    private void streamShortestPathsUsingDijkstra(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxCost, JsonGenerator jg) {
+    private void streamShortestPathsUsingDijkstra(String centerEmail, List<String> bibEntries, List<String> edgeEmails, int maxCost, Map<String,Integer> edgeCosts, JsonGenerator jg) {
         int centerMaxCost = Math.max(Math.min(4, maxCost), maxCost - 4);
         int edgeMaxCost = Math.max(0, maxCost - centerMaxCost);
         try (Transaction tx = db.beginTx()) {
@@ -467,8 +471,9 @@ public class Service {
 
             ThreadToStatementContextBridge ctx = dbAPI.getDependencyResolver().resolveDependency(ThreadToStatementContextBridge.class);
             ReadOperations ops = ctx.get().readOperations();
+            IntIntMap relationshipCosts = edgeCosts == null ? relationshipCosts(ops) : relationshipCosts(ops, edgeCosts);
 
-            Dijkstra centerTraversal = new Dijkstra(ops, relationshipCosts(ops), startNodes, centerMaxCost, new Traversal.NodeCallback() {
+            Dijkstra centerTraversal = new Dijkstra(ops, relationshipCosts, startNodes, centerMaxCost, new Traversal.NodeCallback() {
                 public void explored(Traversal traversal, NodeItem node, long nodeId, int cost, int paths) {
                     String email = edgeEmailsByNodeId.remove(nodeId);
                     if (email != null) { //found a match!
@@ -490,7 +495,7 @@ public class Service {
                 final MutableInt minCost = new MutableInt(0);
                 final MutableInt totalPaths = new MutableInt(0);
 
-                new Dijkstra(ops, relationshipCosts(ops), ImmutableMap.<Long, Integer>of(nodeId, 0), edgeMaxCost, new Traversal.NodeCallback() {
+                new Dijkstra(ops, relationshipCosts, ImmutableMap.<Long, Integer>of(nodeId, 0), edgeMaxCost, new Traversal.NodeCallback() {
                     public void explored(Traversal traversal, NodeItem node, long connectingNode, int cost, int paths) {
                         if (centerTraversal.hasExplored(connectingNode)) {
                             cost = centerTraversal.getCost(connectingNode) + cost;
