@@ -6,10 +6,10 @@
 
     <groupId>com.maxdemarzi</groupId>
     <artifactId>faster-shortest-paths</artifactId>
-    <version>4.0</version>
+    <version>4.1</version>
 
     <properties>
-        <neo4j.version>2.3-SNAPSHOT</neo4j.version>
+        <neo4j.version>2.3.1</neo4j.version>
         <junit.version>4.12</junit.version>
         <guava.version>18.0</guava.version>
         <koloboke.version>0.6.7</koloboke.version>

@@ -419,11 +419,11 @@ public class Service {
 
     private static final IntIntMap relationshipCosts(ReadOperations readOps) {
         if (relationships == null) {
-            Map<String,Integer> costs = ImmutableMap.<String, Integer>builder()
-                .put("EqualTo", 1)
-                .put("HasEmail", 1)
-                .put("AuthoredBy", 2)
-                .put("ContainsEmail", 3)
+           Map<String,Integer> costs = ImmutableMap.<String, Integer>builder()
+                .put("EqualTo", 4)
+                .put("HasEmail", 4)
+                .put("AuthoredBy", 4)
+                .put("ContainsEmail", 4)
                 .put("CoAuthorOf", 4)
                 .put("Follows", 4)
                 .put("hasContact", 4)
