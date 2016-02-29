@@ -20,6 +20,18 @@ public final class NodeCache {
     private final LoadingCache<String, Long> emails;
     private final LoadingCache<String, Long> bibliographyEntries;
 
+    private GraphDatabaseService db = null;
+
+    private static NodeCache instance = null;
+
+    public static synchronized NodeCache getInstance(GraphDatabaseService db) {
+      if (instance == null) {
+        instance = new NodeCache(1_000_000);
+      }
+      instance.useDatabase(db);
+      return instance;
+    }
+
     private static final Long getEmailNodeId(GraphDatabaseService db, String email) throws Exception{
         final Node node = db.findNode(Labels.Email, "email", email);
         if (node != null) {
@@ -38,7 +50,7 @@ public final class NodeCache {
         }
     }
 
-    public NodeCache(final GraphDatabaseService db, long maxSize) {
+    private NodeCache(long maxSize) {
         emails = CacheBuilder.newBuilder()
             .maximumSize(maxSize).build(new CacheLoader<String, Long>() {
                 public Long load(String email) throws Exception {
@@ -52,6 +64,10 @@ public final class NodeCache {
                     return getBibliographyEntryNodeId(db, bibId);
                 }
             });
+    }
+
+    public void useDatabase(GraphDatabaseService db) {
+        this.db = db;
     }
 
     public final Long getEmailNode(String email) throws ExecutionException {

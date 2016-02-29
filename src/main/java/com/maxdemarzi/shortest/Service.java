@@ -62,7 +62,7 @@ public class Service {
     public Service(@Context GraphDatabaseService graphDatabaseService) {
         db = graphDatabaseService;
         dbAPI = (GraphDatabaseAPI) db;
-        nodeCache = new NodeCache(db, 1_000_000);
+        nodeCache = NodeCache.getInstance(db);
     }
 
     @GET
